@@ -1,0 +1,17 @@
+/.gradle/
+/.idea/
+/local.properties
+**/build/
+*.iml
+app/src/main/assets/models/*.onnx
+app/src/main/assets/models/*.part
+app/src/main/assets/models/*.hash
+app/src/main/assets/models/*.bin
+app/src/main/assets/models/models.lock.json
+app/src/main/assets/models/emap.metadata.json
+!app/src/main/assets/models/.gitkeep
+*.apk
+*.aab
+*.sha256
+__pycache__/
+*.py[cod]
