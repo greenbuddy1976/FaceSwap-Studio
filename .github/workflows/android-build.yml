@@ -1,0 +1,116 @@
+name: Clean Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faceswap-clean-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-verify:
+    name: Build and verify on one runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out new source tree
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install fixed Android build tools
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up fixed Gradle version
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+          cache-disabled: true
+
+      - name: Audit clean-room source
+        run: python scripts/source_audit.py
+
+      - name: Install model verification tools
+        run: python -m pip install --disable-pip-version-check numpy==2.1.3 onnx==1.18.0 onnxruntime==1.23.0
+
+      - name: Fetch pristine GitHub model assets with resume and CRC verification
+        run: python scripts/fetch_models.py
+
+      - name: Extract and verify the exact INSwapper EMAP
+        run: python scripts/extract_emap.py
+
+      - name: Run real CPU inference contract tests
+        run: python scripts/verify_models.py
+
+      - name: Compile, unit-test, lint and assemble APK
+        run: gradle --no-daemon --no-build-cache --stacktrace clean testDebugUnitTest lintDebug assembleDebug
+
+      - name: Verify APK signature and packaged payload
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          test -n "$AAPT2"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          python scripts/verify_apk.py "$APK"
+          "$AAPT2" dump badging "$APK" > apk-badging.txt
+          if grep -Eq "android\.permission\.(INTERNET|ACCESS_NETWORK_STATE)" apk-badging.txt; then
+            echo "Forbidden network permission found in APK" >&2
+            exit 1
+          fi
+          "$AAPT2" dump xmltree "$APK" --file AndroidManifest.xml > apk-manifest.txt
+          grep -q 'android:process.*":inference"' apk-manifest.txt
+
+      - name: Name APK and create SHA-256 checksum
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/FaceSwap-Studio-1.0.0-arm64.apk
+          sha256sum dist/FaceSwap-Studio-1.0.0-arm64.apk > dist/FaceSwap-Studio-1.0.0-arm64.apk.sha256
+          cp app/src/main/assets/models/models.lock.json dist/models.lock.json
+          {
+            echo "## FaceSwap Studio clean build"
+            echo
+            echo "- Source audit: passed"
+            echo "- Real ArcFace CPU inference: passed"
+            echo "- Real INSwapper CPU inference: passed"
+            echo "- Unit tests and Android lint: passed"
+            echo "- APK signature and payload: passed"
+            echo
+            echo '```text'
+            cat dist/FaceSwap-Studio-1.0.0-arm64.apk.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verified APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaceSwap-Studio-1.0.0-VERIFIED
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

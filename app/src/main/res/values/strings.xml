@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FaceSwap Studio</string>
+    <string name="app_subtitle">Privater Face-Swap direkt auf deinem Gerät</string>
+    <string name="privacy_note">Bilder werden nicht hochgeladen. Die Verarbeitung läuft vollständig auf diesem Gerät.</string>
+    <string name="source_title">1 · Quellgesicht</string>
+    <string name="source_help">Wähle ein gut sichtbares, möglichst frontales Gesicht.</string>
+    <string name="source_choose">Quellbild auswählen</string>
+    <string name="target_title">2 · Zielbild</string>
+    <string name="target_help">Das größte erkannte Gesicht im Zielbild wird ersetzt.</string>
+    <string name="target_choose">Zielbild auswählen</string>
+    <string name="consent">Ich darf beide Bilder verwenden und nutze das Ergebnis nicht täuschend oder ohne Einwilligung.</string>
+    <string name="start_swap">Face-Swap starten</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="save">Ergebnis speichern</string>
+    <string name="status_ready">Bereit · zwei Bilder auswählen</string>
+    <string name="status_image_selected">Bild gewählt · fehlende Auswahl ergänzen oder starten</string>
+    <string name="result_title">Ergebnis</string>
+    <string name="notification_channel">FaceSwap-Verarbeitung</string>
+    <string name="notification_title">FaceSwap wird erstellt</string>
+    <string name="notification_denied">Benachrichtigungen sind aus. Der Fortschritt bleibt in der geöffneten App sichtbar.</string>
+</resources>
