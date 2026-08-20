@@ -91,7 +91,10 @@ jobs:
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk dist/FaceSwap-Studio-1.0.0-arm64.apk
-          sha256sum dist/FaceSwap-Studio-1.0.0-arm64.apk > dist/FaceSwap-Studio-1.0.0-arm64.apk.sha256
+          (
+            cd dist
+            sha256sum FaceSwap-Studio-1.0.0-arm64.apk > FaceSwap-Studio-1.0.0-arm64.apk.sha256
+          )
           cp app/src/main/assets/models/models.lock.json dist/models.lock.json
           {
             echo "## FaceSwap Studio clean build"
