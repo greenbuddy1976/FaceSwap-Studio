@@ -124,7 +124,7 @@ public final class Mp4AudioMuxer {
                 throw new FaceSwapException("Die Zeitstempel einer Mediendatei sind nicht sortiert.");
             }
             previousPresentationTimeUs = presentationTimeUs;
-            info.set(0, size, presentationTimeUs, extractor.getSampleFlags());
+            info.set(0, size, presentationTimeUs, toCodecFlags(extractor.getSampleFlags()));
             buffer.position(0);
             buffer.limit(size);
             muxer.writeSampleData(destinationTrack, buffer, info);
@@ -133,5 +133,19 @@ public final class Mp4AudioMuxer {
             }
         }
         extractor.unselectTrack(sourceTrack);
+    }
+
+    private static int toCodecFlags(int extractorFlags) throws FaceSwapException {
+        if ((extractorFlags & MediaExtractor.SAMPLE_FLAG_ENCRYPTED) != 0) {
+            throw new FaceSwapException("Verschlüsselte Video- oder Tonspuren werden nicht unterstützt.");
+        }
+        int codecFlags = 0;
+        if ((extractorFlags & MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
+            codecFlags |= MediaCodec.BUFFER_FLAG_KEY_FRAME;
+        }
+        if ((extractorFlags & MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME) != 0) {
+            codecFlags |= MediaCodec.BUFFER_FLAG_PARTIAL_FRAME;
+        }
+        return codecFlags;
     }
 }
