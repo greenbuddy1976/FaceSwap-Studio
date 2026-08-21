@@ -90,7 +90,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
-            set -euo pipefail
+            set -eu
             adb logcat -c
             gradle --no-daemon --no-build-cache --stacktrace -PfaceswapAbi=x86_64 connectedDebugAndroidTest
             adb logcat -d -v brief -s FaceSwapE2E:I '*:S' | tee faceswap-e2e-metrics.txt
