@@ -29,7 +29,7 @@ import java.util.concurrent.Executors;
 
 public final class FaceSwapViewModel extends AndroidViewModel {
     private static final long MAX_FACE_BYTES = 80L * 1024L * 1024L;
-    private static final long MAX_VIDEO_BYTES = 1_500L * 1024L * 1024L;
+    private static final long MAX_VIDEO_BYTES = 8L * 1024L * 1024L * 1024L;
     private static final long UI_WATCHDOG_MS = 30_000L;
     private static final long UI_WATCHDOG_POLL_MS = 10_000L;
 

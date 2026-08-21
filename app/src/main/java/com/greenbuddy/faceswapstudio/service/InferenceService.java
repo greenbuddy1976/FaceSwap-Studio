@@ -18,6 +18,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
@@ -36,7 +37,8 @@ public final class InferenceService extends Service {
     private static final String CHANNEL_ID = "faceswap_processing";
     private static final int NOTIFICATION_ID = 1042;
     private static final long HEARTBEAT_INTERVAL_MS = 5_000L;
-    private static final long TOTAL_JOB_TIMEOUT_MS = 30L * 60L * 1_000L;
+    private static final long TOTAL_JOB_TIMEOUT_MINUTES = 330L;
+    private static final long TOTAL_JOB_TIMEOUT_MS = TOTAL_JOB_TIMEOUT_MINUTES * 60L * 1_000L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean finishing = new AtomicBoolean(false);
@@ -160,12 +162,19 @@ public final class InferenceService extends Service {
         }
         totalTimeoutRunnable = () -> {
             if (finishing.compareAndSet(false, true)) {
-                String message = "Die Videoverarbeitung hat die feste 30-Minuten-Grenze überschritten und wurde beendet.";
+                String message = "Die Videoverarbeitung hat die Sicherheitsgrenze von 5 Stunden und 30 Minuten überschritten und wurde beendet.";
                 send(receiver, InferenceContract.RESULT_ERROR, currentProgress, message, null);
                 stopAndReleaseProcess();
             }
         };
         mainHandler.postDelayed(totalTimeoutRunnable, TOTAL_JOB_TIMEOUT_MS);
+    }
+
+    @Override
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    public void onTimeout(int startId, int foregroundServiceType) {
+        String message = "Android hat das verfügbare Zeitfenster für die Videoverarbeitung beendet.";
+        fail(message, new IllegalStateException(message));
     }
 
     private void armHeartbeat() {

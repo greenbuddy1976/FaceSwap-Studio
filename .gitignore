@@ -15,5 +15,6 @@ app/src/main/assets/models/emap.metadata.json
 *.aab
 *.sha256
 !/release-certificate.sha256
+app/src/androidTest/assets/generated_video/ten-minute-target-with-audio.mp4
 __pycache__/
 *.py[cod]

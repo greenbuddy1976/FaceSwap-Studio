@@ -324,7 +324,7 @@ public final class AvcBitmapEncoder implements AutoCloseable {
 
     private static int bitrate(int width, int height, int frameRate) {
         long calculated = Math.round(width * (double) height * frameRate * 0.22d);
-        return (int) Math.max(800_000L, Math.min(8_000_000L, calculated));
+        return (int) Math.max(250_000L, Math.min(8_000_000L, calculated));
     }
 
     private static int y(int red, int green, int blue) {

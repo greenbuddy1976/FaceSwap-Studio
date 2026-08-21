@@ -52,6 +52,9 @@ jobs:
           gradle-version: "8.13"
           cache-disabled: true
 
+      - name: Generate fresh hash-locked ten-minute test MP4
+        run: bash scripts/generate_ten_minute_test_video.sh
+
       - name: Audit clean-room source
         run: python scripts/source_audit.py
 
@@ -94,6 +97,8 @@ jobs:
             adb logcat -c
             gradle --no-daemon --no-build-cache --stacktrace -PfaceswapAbi=x86_64 connectedDebugAndroidTest
             adb logcat -d -v brief -s FaceSwapE2E:I '*:S' | tee faceswap-e2e-metrics.txt
+            grep -q 'FACESWAP_STABLE_CPU_FALLBACK_INFERENCE_PASS' faceswap-e2e-metrics.txt
+            grep -q 'FACESWAP_TEN_MINUTE_VIDEO_E2E_PASS' faceswap-e2e-metrics.txt
             grep -q 'FACESWAP_VIDEO_E2E_FULL_PASS' faceswap-e2e-metrics.txt
 
       - name: Decode and validate dedicated release signing bundle
@@ -164,23 +169,25 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/FaceSwap-Studio-VIDEO-1.2.0-RELEASE-arm64.apk
           (
             cd dist
-            sha256sum FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk > FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk.sha256
+            sha256sum FaceSwap-Studio-VIDEO-1.2.0-RELEASE-arm64.apk > FaceSwap-Studio-VIDEO-1.2.0-RELEASE-arm64.apk.sha256
           )
           cp app/src/main/assets/models/models.lock.json dist/models.lock.json
           cp release-certificate.sha256 dist/release-certificate.sha256
           {
-            echo "FaceSwap Studio VIDEO 1.1.0 production verification"
+            echo "FaceSwap Studio VIDEO 1.2.0 production verification"
             echo "commit=${{ github.sha }}"
             echo "source_audit=PASS"
             echo "arcface_real_cpu_inference=PASS"
             echo "inswapper_real_cpu_inference=PASS"
             echo "android_generated_video_face_detection=PASS"
+            echo "android_stable_cpu_fallback_inference=PASS"
             echo "android_isolated_video_swap_under_240s=PASS"
             echo "android_output_h264_mp4=PASS"
             echo "android_original_audio_payload_unchanged=PASS"
+            echo "android_ten_minute_video_end_to_end=PASS"
             echo "android_corrupt_video_fast_error=PASS"
             echo "android_cancellation_under_15s=PASS"
             echo "unit_tests=PASS"
@@ -195,18 +202,20 @@ jobs:
             cat apk-signature.txt
           } > dist/verification-summary.txt
           {
-            echo "## FaceSwap Studio VIDEO 1.1.0 production release"
+            echo "## FaceSwap Studio VIDEO 1.2.0 production release"
             echo
             echo "- Fresh clean-room source audit: passed"
             echo "- Real Android photo-to-video face swap: passed"
+            echo "- Stable CPU retry backend for non-finite accelerated output: passed"
             echo "- H.264 MP4 output and unchanged compressed audio: passed"
+            echo "- Real ten-minute MP4 duration and audio preservation: passed"
             echo "- 240-second video performance gate: passed"
             echo "- Corrupt video and cancellation gates: passed"
             echo "- Unit tests and debug/release lint: passed"
             echo "- Dedicated release signature, 16 KB alignment and payload: passed"
             echo
             echo '~~~text'
-            cat dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk.sha256
+            cat dist/FaceSwap-Studio-VIDEO-1.2.0-RELEASE-arm64.apk.sha256
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -214,7 +223,7 @@ jobs:
         id: upload-apk
         uses: actions/upload-artifact@v7
         with:
-          path: dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk
+          path: dist/FaceSwap-Studio-VIDEO-1.2.0-RELEASE-arm64.apk
           if-no-files-found: error
           archive: false
           retention-days: 90
@@ -222,7 +231,7 @@ jobs:
       - name: Verify the downloadable APK is byte-identical
         shell: bash
         run: |
-          EXPECTED="$(sha256sum dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk | awk '{print $1}')"
+          EXPECTED="$(sha256sum dist/FaceSwap-Studio-VIDEO-1.2.0-RELEASE-arm64.apk | awk '{print $1}')"
           test "${{ steps.upload-apk.outputs.artifact-digest }}" = "$EXPECTED"
           {
             echo

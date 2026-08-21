@@ -3,6 +3,8 @@ package com.greenbuddy.faceswapstudio.engine;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 
+import androidx.annotation.VisibleForTesting;
+
 import java.nio.FloatBuffer;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,9 +18,16 @@ public final class FaceEmbedder {
     private static final String MODEL_PATH = "models/arcface_w600k_r50.onnx";
 
     private final AssetManager assets;
+    private final boolean forceCpuFallback;
 
     public FaceEmbedder(AssetManager assets) {
+        this(assets, false);
+    }
+
+    @VisibleForTesting
+    public FaceEmbedder(AssetManager assets, boolean forceCpuFallback) {
         this.assets = assets;
+        this.forceCpuFallback = forceCpuFallback;
     }
 
     public float[] embed(Bitmap alignedFace) throws FaceSwapException {
@@ -30,9 +39,36 @@ public final class FaceEmbedder {
             throw new FaceSwapException("ONNX Runtime konnte nicht gestartet werden.", error);
         }
 
+        try (MappedAsset model = MappedAsset.open(assets, MODEL_PATH)) {
+            if (forceCpuFallback) {
+                return runEmbedding(environment, model, input, false);
+            }
+            return OnnxTools.retryNonFinite(
+                () -> runEmbedding(environment, model, input, true),
+                () -> runEmbedding(environment, model, input, false)
+            );
+        } catch (FaceSwapException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw new FaceSwapException(
+                "Das Gesichtsprofil konnte vom ArcFace-Modell nicht berechnet werden.",
+                error
+            );
+        } catch (OutOfMemoryError error) {
+            throw new FaceSwapException("Zu wenig Arbeitsspeicher für das ArcFace-Modell.", error);
+        }
+    }
+
+    private static float[] runEmbedding(
+        OrtEnvironment environment,
+        MappedAsset model,
+        float[] input,
+        boolean useXnnpack
+    ) throws FaceSwapException {
         try (
-            MappedAsset model = MappedAsset.open(assets, MODEL_PATH);
-            OrtSession.SessionOptions options = OnnxTools.stableCpuOptions();
+            OrtSession.SessionOptions options = useXnnpack
+                ? OnnxTools.stableCpuOptions()
+                : OnnxTools.stableCpuFallbackOptions();
             OrtSession session = environment.createSession(model.getBuffer(), options)
         ) {
             String inputName = session.getInputNames().iterator().next();

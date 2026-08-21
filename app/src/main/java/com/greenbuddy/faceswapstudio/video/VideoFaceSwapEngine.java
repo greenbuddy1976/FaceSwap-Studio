@@ -22,10 +22,6 @@ import java.io.File;
 /** Offline photo-to-video face swap with H.264 MP4 output and untouched source audio. */
 public final class VideoFaceSwapEngine {
     private static final int MAX_LONG_EDGE = 720;
-    private static final int MAX_FRAME_RATE = 12;
-    private static final int MIN_FRAME_RATE = 2;
-    private static final int MAX_OUTPUT_FRAMES = 900;
-    private static final long MAX_DURATION_US = 180_000_000L;
     private static final long FRAME_STAGE_TIMEOUT_MS = 120_000L;
 
     private final Context context;
@@ -62,11 +58,12 @@ public final class VideoFaceSwapEngine {
                 firstOriented.recycle();
             }
 
-            int frameRate = chooseFrameRate(spec.frameRate, spec.durationUs);
+            int frameRate = VideoLimits.chooseOutputFrameRate(spec.frameRate);
             int frameCount = Math.max(
                 1,
                 (int) Math.ceil(spec.durationUs * frameRate / 1_000_000d)
             );
+            int swapInterval = VideoLimits.chooseSwapInterval(frameCount);
             progress.update(
                 ProgressPlan.VIDEO_OPENED,
                 "Video geöffnet · " + frameCount + " Bilder werden verarbeitet",
@@ -93,6 +90,7 @@ public final class VideoFaceSwapEngine {
             );
 
             int swappedFrames = 0;
+            float[] cachedSwap = null;
             try (
                 FaceSwapper swapper = new FaceSwapper(context.getAssets());
                 AvcBitmapEncoder encoder = new AvcBitmapEncoder(
@@ -135,17 +133,21 @@ public final class VideoFaceSwapEngine {
                             );
                             Bitmap crop = targetAligned.getBitmap();
                             try {
-                                float[] swapped = swapper.swap(crop, embedding);
+                                if (cachedSwap == null || index % swapInterval == 0) {
+                                    cachedSwap = swapper.swap(crop, embedding);
+                                }
                                 processed = ImageTransforms.blendSwap(
                                     frame,
                                     crop,
-                                    swapped,
+                                    cachedSwap,
                                     targetAligned.getForwardTransform()
                                 );
                                 swappedFrames++;
                             } finally {
                                 crop.recycle();
                             }
+                        } else {
+                            cachedSwap = null;
                         }
                         encoder.encode(processed, timeUs);
                     } finally {
@@ -218,8 +220,10 @@ public final class VideoFaceSwapEngine {
             throw new FaceSwapException("Das ausgewählte Video besitzt keine gültige Dauer.");
         }
         long durationUs = durationMs * 1_000L;
-        if (durationUs > MAX_DURATION_US) {
-            throw new FaceSwapException("Das Video darf höchstens drei Minuten lang sein.");
+        if (!VideoLimits.supportsDuration(durationUs)) {
+            throw new FaceSwapException(
+                "Das Video darf höchstens " + VideoLimits.MAX_DURATION_MINUTES + " Minuten lang sein."
+            );
         }
         int rotation = normalizeRotation((int) parseLong(
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION),
@@ -232,7 +236,7 @@ public final class VideoFaceSwapEngine {
         float trackFrameRate = readTrackFrameRate(inputVideo);
         float frameRate = metadataFrameRate > 0f ? metadataFrameRate : trackFrameRate;
         if (!Float.isFinite(frameRate) || frameRate <= 0f) {
-            frameRate = MAX_FRAME_RATE;
+            frameRate = VideoLimits.MAX_OUTPUT_FRAME_RATE;
         }
         int width = (int) parseLong(
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH),
@@ -357,15 +361,6 @@ public final class VideoFaceSwapEngine {
         int outputWidth = even(Math.max(2, (int) Math.round(width * scale)));
         int outputHeight = even(Math.max(2, (int) Math.round(height * scale)));
         return new Dimensions(outputWidth, outputHeight);
-    }
-
-    private static int chooseFrameRate(float inputFrameRate, long durationUs) {
-        int requested = Math.max(
-            MIN_FRAME_RATE,
-            Math.min(MAX_FRAME_RATE, Math.round(inputFrameRate))
-        );
-        int durationLimited = (int) Math.floor(MAX_OUTPUT_FRAMES * 1_000_000d / durationUs);
-        return Math.max(MIN_FRAME_RATE, Math.min(requested, durationLimited));
     }
 
     private static void validateOutput(File output, boolean audioExpected) throws FaceSwapException {

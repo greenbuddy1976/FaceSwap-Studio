@@ -17,11 +17,14 @@ REQUIRED = (
     "app/build.gradle.kts",
     "app/src/main/AndroidManifest.xml",
     "app/src/main/java/com/greenbuddy/faceswapstudio/video/VideoFaceSwapEngine.java",
+    "app/src/main/java/com/greenbuddy/faceswapstudio/video/VideoLimits.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/video/AvcBitmapEncoder.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/video/Mp4AudioMuxer.java",
+    "app/src/main/java/com/greenbuddy/faceswapstudio/engine/NonFiniteModelOutputException.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/service/InferenceService.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/ui/MainActivity.java",
     "app/src/androidTest/java/com/greenbuddy/faceswapstudio/FaceSwapEndToEndTest.java",
+    "scripts/generate_ten_minute_test_video.sh",
     ".github/workflows/android-build.yml",
 )
 FORBIDDEN_SOURCE_MARKERS = (
@@ -47,6 +50,8 @@ TEST_RASTER_SHA256 = {
 TEST_VIDEO_SHA256 = {
     "app/src/androidTest/assets/generated_video/target-with-audio.mp4":
         "a97a2ae6e01ccd9651aa9d07824a015eaba6fc359c160cee8fd35e09e0e36a1d",
+    "app/src/androidTest/assets/generated_video/ten-minute-target-with-audio.mp4":
+        "58998fac2b943890e07ce9dc8dca9e336a0d0e24348a9defe36cf36dcfaa8eb1",
 }
 
 
@@ -73,6 +78,24 @@ def main() -> int:
         errors.append("isolated inference process must initialize ML Kit explicitly")
     if "VideoFaceSwapEngine" not in inference_service:
         errors.append("inference service must execute the video face-swap engine")
+    if "TOTAL_JOB_TIMEOUT_MINUTES = 330L" not in inference_service:
+        errors.append("long-form inference service timeout must remain 5.5 hours")
+    if "public void onTimeout(int startId, int foregroundServiceType)" not in inference_service:
+        errors.append("Android media-processing timeout callback is missing")
+
+    video_limits = (
+        ROOT / "app/src/main/java/com/greenbuddy/faceswapstudio/video/VideoLimits.java"
+    ).read_text(encoding="utf-8")
+    if "MAX_DURATION_MINUTES = 15" not in video_limits:
+        errors.append("video engine must accept at least ten-minute inputs")
+    if "MAX_SWAP_INFERENCES = 1_200" not in video_limits:
+        errors.append("long-video model-inference budget is missing")
+
+    onnx_tools = (
+        ROOT / "app/src/main/java/com/greenbuddy/faceswapstudio/engine/OnnxTools.java"
+    ).read_text(encoding="utf-8")
+    if "stableCpuFallbackOptions" not in onnx_tools or "retryNonFinite" not in onnx_tools:
+        errors.append("automatic non-finite ONNX CPU retry is missing")
 
     obsolete_engine = ROOT / "app/src/main/java/com/greenbuddy/faceswapstudio/engine/FaceSwapEngine.java"
     if obsolete_engine.exists():
@@ -140,6 +163,8 @@ def main() -> int:
     for marker in (
         "assertAudioPayloadUnchanged",
         "compressed audio payload changed",
+        "FACESWAP_STABLE_CPU_FALLBACK_INFERENCE_PASS",
+        "FACESWAP_TEN_MINUTE_VIDEO_E2E_PASS",
         "FACESWAP_VIDEO_E2E_FULL_PASS",
     ):
         if marker not in end_to_end_test:

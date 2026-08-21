@@ -28,7 +28,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import com.greenbuddy.faceswapstudio.engine.BitmapLoader;
+import com.greenbuddy.faceswapstudio.engine.DetectedFace;
+import com.greenbuddy.faceswapstudio.engine.FaceEmbedder;
 import com.greenbuddy.faceswapstudio.engine.FaceSwapException;
+import com.greenbuddy.faceswapstudio.engine.FaceSwapper;
+import com.greenbuddy.faceswapstudio.engine.ImageTransforms;
 import com.greenbuddy.faceswapstudio.engine.MlKitFaceLocator;
 import com.greenbuddy.faceswapstudio.engine.ProgressPlan;
 import com.greenbuddy.faceswapstudio.service.InferenceContract;
@@ -57,8 +61,11 @@ public final class FaceSwapEndToEndTest {
     private static final String TAG = "FaceSwapE2E";
     private static final long FULL_VIDEO_LIMIT_MS = 240_000L;
     private static final long TERMINAL_WAIT_SECONDS = 300L;
+    private static final long TEN_MINUTE_DURATION_MS = 600_000L;
+    private static final long TEN_MINUTE_VIDEO_LIMIT_MS = 1_800_000L;
+    private static final long TEN_MINUTE_TERMINAL_WAIT_SECONDS = 1_900L;
 
-    @Test(timeout = 420_000L)
+    @Test(timeout = 2_400_000L)
     public void videoFaceSwapPreservesAudioRejectsCorruptionAndCancels() throws Exception {
         Context app = InstrumentationRegistry.getInstrumentation().getTargetContext();
         Context tests = InstrumentationRegistry.getInstrumentation().getContext();
@@ -85,6 +92,7 @@ public final class FaceSwapEndToEndTest {
                 new File(root, "target-with-audio.mp4")
             );
             verifyFaceInputs(face, video);
+            verifyStableCpuFallback(app, face, video);
 
             File output = new File(root, "result.mp4");
             JobResult completed = runServiceJob(app, face, video, output, false);
@@ -141,6 +149,50 @@ public final class FaceSwapEndToEndTest {
                 cancelled.elapsedMs < 15_000L
             );
             Log.i(TAG, "FACESWAP_VIDEO_METRIC cancellation_ms=" + cancelled.elapsedMs);
+
+            SystemClock.sleep(1_500L);
+            File tenMinuteVideo = copyAsset(
+                tests,
+                "generated_video/ten-minute-target-with-audio.mp4",
+                new File(root, "ten-minute-target-with-audio.mp4")
+            );
+            assertTrue(
+                "long-form fixture must be at least ten minutes",
+                durationMs(tenMinuteVideo) >= TEN_MINUTE_DURATION_MS
+            );
+            verifyFaceInputs(face, tenMinuteVideo);
+            File tenMinuteOutput = new File(root, "ten-minute-result.mp4");
+            JobResult tenMinuteCompleted = runServiceJob(
+                app,
+                face,
+                tenMinuteVideo,
+                tenMinuteOutput,
+                false,
+                TEN_MINUTE_TERMINAL_WAIT_SECONDS
+            );
+            assertEquals(
+                "ten-minute video must complete in the isolated inference process",
+                InferenceContract.RESULT_SUCCESS,
+                tenMinuteCompleted.code.get()
+            );
+            assertTrue(
+                "ten-minute video processing exceeded its anti-hang gate: "
+                    + tenMinuteCompleted.elapsedMs + " ms",
+                tenMinuteCompleted.elapsedMs <= TEN_MINUTE_VIDEO_LIMIT_MS
+            );
+            assertHealthyProgress(tenMinuteCompleted);
+            assertValidChangedMp4(tenMinuteVideo, tenMinuteOutput);
+            assertFrameAreaChanged(tenMinuteVideo, tenMinuteOutput, 333_333L);
+            assertAudioPayloadUnchanged(tenMinuteVideo, tenMinuteOutput);
+            assertTrue(
+                "ten-minute output was shortened",
+                durationMs(tenMinuteOutput) >= TEN_MINUTE_DURATION_MS - 300L
+            );
+            Log.i(
+                TAG,
+                "FACESWAP_VIDEO_METRIC ten_minute_service_ms=" + tenMinuteCompleted.elapsedMs
+            );
+            Log.i(TAG, "FACESWAP_TEN_MINUTE_VIDEO_E2E_PASS");
             Log.i(TAG, "FACESWAP_VIDEO_E2E_FULL_PASS");
         } finally {
             InstrumentationRegistry.getInstrumentation().runOnMainSync(activity::finish);
@@ -171,12 +223,74 @@ public final class FaceSwapEndToEndTest {
         }
     }
 
+    private static void verifyStableCpuFallback(Context app, File facePhoto, File video)
+        throws Exception {
+        Bitmap source = BitmapLoader.decode(facePhoto, 1024);
+        Bitmap frame = firstFrame(video);
+        Bitmap sourceAligned = null;
+        Bitmap targetAligned = null;
+        try (MlKitFaceLocator locator = new MlKitFaceLocator()) {
+            DetectedFace sourceFace = locator.findLargest(source, "Gesichtsfoto");
+            DetectedFace targetFace = locator.findLargest(frame, "erstem Videobild");
+            sourceAligned = ImageTransforms.alignForEmbedding(
+                source,
+                sourceFace.getLandmarks()
+            ).getBitmap();
+            targetAligned = ImageTransforms.alignForSwap(
+                frame,
+                targetFace.getLandmarks()
+            ).getBitmap();
+
+            float[] embedding = new FaceEmbedder(app.getAssets(), true).embed(sourceAligned);
+            assertFinite("CPU ArcFace", embedding, 512);
+            try (FaceSwapper swapper = new FaceSwapper(app.getAssets(), true)) {
+                float[] swapped = swapper.swap(targetAligned, embedding);
+                assertFinite("CPU INSwapper", swapped, 3 * 128 * 128);
+            }
+            Log.i(TAG, "FACESWAP_STABLE_CPU_FALLBACK_INFERENCE_PASS");
+        } finally {
+            if (targetAligned != null) {
+                targetAligned.recycle();
+            }
+            if (sourceAligned != null) {
+                sourceAligned.recycle();
+            }
+            source.recycle();
+            frame.recycle();
+        }
+    }
+
+    private static void assertFinite(String label, float[] values, int expectedLength) {
+        assertEquals(label + " output length", expectedLength, values.length);
+        for (float value : values) {
+            assertTrue(label + " produced a non-finite value", Float.isFinite(value));
+        }
+    }
+
     private static JobResult runServiceJob(
         Context app,
         File face,
         File video,
         File output,
         boolean cancelAfterFirstProgress
+    ) throws Exception {
+        return runServiceJob(
+            app,
+            face,
+            video,
+            output,
+            cancelAfterFirstProgress,
+            TERMINAL_WAIT_SECONDS
+        );
+    }
+
+    private static JobResult runServiceJob(
+        Context app,
+        File face,
+        File video,
+        File output,
+        boolean cancelAfterFirstProgress,
+        long terminalWaitSeconds
     ) throws Exception {
         CountDownLatch terminal = new CountDownLatch(1);
         CountDownLatch firstProgress = new CountDownLatch(1);
@@ -225,7 +339,7 @@ public final class FaceSwapEndToEndTest {
 
         assertTrue(
             "inference process did not reach a terminal state; last message=" + result.message,
-            terminal.await(TERMINAL_WAIT_SECONDS, TimeUnit.SECONDS)
+            terminal.await(terminalWaitSeconds, TimeUnit.SECONDS)
         );
         return result;
     }
@@ -278,8 +392,12 @@ public final class FaceSwapEndToEndTest {
             Math.abs(inputDuration - outputDuration) <= 300L
         );
 
-        Bitmap before = firstFrame(input);
-        Bitmap after = firstFrame(output);
+        assertFrameAreaChanged(input, output, 0L);
+    }
+
+    private static void assertFrameAreaChanged(File input, File output, long timeUs) throws Exception {
+        Bitmap before = frameAt(input, timeUs);
+        Bitmap after = frameAt(output, timeUs);
         try {
             assertEquals(before.getWidth(), after.getWidth());
             assertEquals(before.getHeight(), after.getHeight());
@@ -399,11 +517,15 @@ public final class FaceSwapEndToEndTest {
     }
 
     private static Bitmap firstFrame(File file) throws Exception {
+        return frameAt(file, 0L);
+    }
+
+    private static Bitmap frameAt(File file, long timeUs) throws Exception {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(file.getAbsolutePath());
-            Bitmap frame = retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST);
-            assertNotNull("could not decode first video frame: " + file, frame);
+            Bitmap frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST);
+            assertNotNull("could not decode video frame at " + timeUs + " us: " + file, frame);
             return frame;
         } finally {
             retriever.release();

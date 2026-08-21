@@ -3,12 +3,15 @@ package com.greenbuddy.faceswapstudio.engine;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 
+import androidx.annotation.VisibleForTesting;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -27,15 +30,25 @@ public final class FaceSwapper implements AutoCloseable {
     private static final int OUTPUT_SIZE = 3 * 128 * 128;
 
     private final AssetManager assets;
+    private final boolean forceCpuFallback;
     private OrtEnvironment environment;
     private MappedAsset model;
     private OrtSession.SessionOptions options;
     private OrtSession session;
     private InputNames inputNames;
     private float[] emap;
+    private float[] cachedSourceEmbedding;
+    private float[] cachedSourceLatent;
+    private boolean cpuFallbackActive;
 
     public FaceSwapper(AssetManager assets) {
+        this(assets, false);
+    }
+
+    @VisibleForTesting
+    public FaceSwapper(AssetManager assets, boolean forceCpuFallback) {
         this.assets = assets;
+        this.forceCpuFallback = forceCpuFallback;
     }
 
     public float[] swap(Bitmap alignedTarget, float[] sourceEmbedding) throws FaceSwapException {
@@ -43,8 +56,21 @@ public final class FaceSwapper implements AutoCloseable {
             throw new FaceSwapException("Das Gesichtsprofil besitzt nicht 512 Werte.");
         }
         ensureInitialized();
-        float[] latent = transformEmbedding(sourceEmbedding, emap);
+        float[] latent = sourceLatent(sourceEmbedding);
         float[] targetInput = ImageTransforms.toSwapTensor(alignedTarget);
+        if (cpuFallbackActive) {
+            return runSwap(latent, targetInput);
+        }
+        return OnnxTools.retryNonFinite(
+            () -> runSwap(latent, targetInput),
+            () -> {
+                activateCpuFallback();
+                return runSwap(latent, targetInput);
+            }
+        );
+    }
+
+    private float[] runSwap(float[] latent, float[] targetInput) throws FaceSwapException {
         try (
             OnnxTensor sourceTensor = OnnxTensor.createTensor(
                 environment,
@@ -75,6 +101,17 @@ public final class FaceSwapper implements AutoCloseable {
         }
     }
 
+    private float[] sourceLatent(float[] sourceEmbedding) throws FaceSwapException {
+        if (
+            cachedSourceEmbedding == null
+                || !Arrays.equals(cachedSourceEmbedding, sourceEmbedding)
+        ) {
+            cachedSourceEmbedding = Arrays.copyOf(sourceEmbedding, sourceEmbedding.length);
+            cachedSourceLatent = transformEmbedding(sourceEmbedding, emap);
+        }
+        return cachedSourceLatent;
+    }
+
     private synchronized void ensureInitialized() throws FaceSwapException {
         if (session != null) {
             return;
@@ -83,9 +120,12 @@ public final class FaceSwapper implements AutoCloseable {
             environment = OrtEnvironment.getEnvironment("faceswap-studio");
             emap = loadEmap();
             model = MappedAsset.open(assets, MODEL_PATH);
-            options = OnnxTools.stableCpuOptions();
+            options = forceCpuFallback
+                ? OnnxTools.stableCpuFallbackOptions()
+                : OnnxTools.stableCpuOptions();
             session = environment.createSession(model.getBuffer(), options);
             inputNames = resolveInputNames(session);
+            cpuFallbackActive = forceCpuFallback;
         } catch (FaceSwapException error) {
             close();
             throw error;
@@ -101,6 +141,25 @@ public final class FaceSwapper implements AutoCloseable {
         } catch (Throwable error) {
             close();
             throw new FaceSwapException("ONNX Runtime konnte nicht gestartet werden.", error);
+        }
+    }
+
+    private synchronized void activateCpuFallback() throws FaceSwapException {
+        if (cpuFallbackActive) {
+            return;
+        }
+        closeSessionAndOptions();
+        try {
+            options = OnnxTools.stableCpuFallbackOptions();
+            session = environment.createSession(model.getBuffer(), options);
+            inputNames = resolveInputNames(session);
+            cpuFallbackActive = true;
+        } catch (OrtException | RuntimeException error) {
+            close();
+            throw new FaceSwapException(
+                "Der stabile CPU-Ersatzmodus des Face-Swap-Modells konnte nicht gestartet werden.",
+                error
+            );
         }
     }
 
@@ -197,6 +256,19 @@ public final class FaceSwapper implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        closeSessionAndOptions();
+        if (model != null) {
+            model.close();
+            model = null;
+        }
+        inputNames = null;
+        emap = null;
+        cachedSourceEmbedding = null;
+        cachedSourceLatent = null;
+        cpuFallbackActive = false;
+    }
+
+    private void closeSessionAndOptions() {
         if (session != null) {
             try {
                 session.close();
@@ -213,11 +285,5 @@ public final class FaceSwapper implements AutoCloseable {
             }
             options = null;
         }
-        if (model != null) {
-            model.close();
-            model = null;
-        }
-        inputNames = null;
-        emap = null;
     }
 }
