@@ -1,35 +1,37 @@
-name: Clean Android APK
+name: FaceSwap production verification
 
 on:
   workflow_dispatch:
   push:
+    branches: ["**"]
+  pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: faceswap-clean-build-${{ github.ref }}
+  group: faceswap-production-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-verify:
-    name: Build and verify on one runner
+    name: End-to-end test and release on one runner
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Check out new source tree
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -45,7 +47,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up fixed Gradle version
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.13"
           cache-disabled: true
@@ -63,57 +65,171 @@ jobs:
         run: python scripts/extract_emap.py
 
       - name: Run real CPU inference contract tests
-        run: python scripts/verify_models.py
+        run: python scripts/verify_models.py | tee model-verification.txt
 
-      - name: Compile, unit-test, lint and assemble APK
-        run: gradle --no-daemon --no-build-cache --stacktrace clean testDebugUnitTest lintDebug assembleDebug
+      - name: Compile, unit-test and lint debug test target
+        run: gradle --no-daemon --no-build-cache --stacktrace clean testDebugUnitTest lintDebug
 
-      - name: Verify APK signature and packaged payload
+      - name: Enable KVM for the one GitHub runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run full Android face-swap and failure-path tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          cores: 4
+          ram-size: 4096M
+          heap-size: 1536M
+          disk-size: 8G
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -euo pipefail
+            adb logcat -c
+            gradle --no-daemon --no-build-cache --stacktrace -PfaceswapAbi=x86_64 connectedDebugAndroidTest
+            adb logcat -d -v brief -s FaceSwapE2E:I '*:S' | tee faceswap-e2e-metrics.txt
+            grep -q 'FACESWAP_E2E_FULL_PASS' faceswap-e2e-metrics.txt
+
+      - name: Decode and validate dedicated release signing bundle
+        shell: bash
+        env:
+          RELEASE_SIGNING_BUNDLE_BASE64: ${{ secrets.SIGNING }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_SIGNING_BUNDLE_BASE64"
+          SIGNING_DIR="$RUNNER_TEMP/faceswap-release-signing"
+          install -d -m 700 "$SIGNING_DIR"
+          printf '%s' "$RELEASE_SIGNING_BUNDLE_BASE64" | base64 --decode > "$RUNNER_TEMP/faceswap-release-signing.tar.gz"
+          test "$(tar -tzf "$RUNNER_TEMP/faceswap-release-signing.tar.gz" | sort | tr '\n' ' ')" = "credentials.env faceswap-studio-release.jks "
+          tar -xzf "$RUNNER_TEMP/faceswap-release-signing.tar.gz" -C "$SIGNING_DIR"
+          chmod 600 "$SIGNING_DIR/credentials.env" "$SIGNING_DIR/faceswap-studio-release.jks"
+          set -a
+          source "$SIGNING_DIR/credentials.env"
+          set +a
+          test -n "$RELEASE_STORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          test -n "$RELEASE_KEY_PASSWORD"
+          echo "::add-mask::$RELEASE_STORE_PASSWORD"
+          echo "::add-mask::$RELEASE_KEY_ALIAS"
+          echo "::add-mask::$RELEASE_KEY_PASSWORD"
+          keytool -list \
+            -keystore "$SIGNING_DIR/faceswap-studio-release.jks" \
+            -storepass "$RELEASE_STORE_PASSWORD" \
+            -alias "$RELEASE_KEY_ALIAS" >/dev/null
+          {
+            echo "RELEASE_STORE_FILE=$SIGNING_DIR/faceswap-studio-release.jks"
+            echo "RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
+            echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+            echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build non-debuggable ARM64 release APK
+        run: gradle --no-daemon --no-build-cache --stacktrace -PfaceswapAbi=arm64-v8a lintRelease assembleRelease
+
+      - name: Verify release signature, alignment and packaged payload
         shell: bash
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="app/build/outputs/apk/release/app-release.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -n 1)"
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
           test -n "$AAPT2"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          test -n "$ZIPALIGN"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee apk-signature.txt
+          EXPECTED_CERT="$(tr -d '[:space:]' < release-certificate.sha256)"
+          ACTUAL_CERT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/{print tolower($2); exit}' apk-signature.txt)"
+          test "$ACTUAL_CERT" = "$EXPECTED_CERT"
+          "$ZIPALIGN" -P 16 -c -v 4 "$APK" > zipalign-verification.txt
           python scripts/verify_apk.py "$APK"
           "$AAPT2" dump badging "$APK" > apk-badging.txt
-          if grep -Eq "android\.permission\.(INTERNET|ACCESS_NETWORK_STATE)" apk-badging.txt; then
+          if grep -Eq "android\\.permission\\.(INTERNET|ACCESS_NETWORK_STATE)" apk-badging.txt; then
             echo "Forbidden network permission found in APK" >&2
+            exit 1
+          fi
+          if grep -q '^application-debuggable' apk-badging.txt; then
+            echo "Release APK is debuggable" >&2
             exit 1
           fi
           "$AAPT2" dump xmltree "$APK" --file AndroidManifest.xml > apk-manifest.txt
           grep -q 'android:process.*":inference"' apk-manifest.txt
 
-      - name: Name APK and create SHA-256 checksum
+      - name: Create final production package and evidence
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/FaceSwap-Studio-1.0.0-arm64.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/FaceSwap-Studio-1.0.0-RELEASE-arm64.apk
           (
             cd dist
-            sha256sum FaceSwap-Studio-1.0.0-arm64.apk > FaceSwap-Studio-1.0.0-arm64.apk.sha256
+            sha256sum FaceSwap-Studio-1.0.0-RELEASE-arm64.apk > FaceSwap-Studio-1.0.0-RELEASE-arm64.apk.sha256
           )
           cp app/src/main/assets/models/models.lock.json dist/models.lock.json
+          cp release-certificate.sha256 dist/release-certificate.sha256
           {
-            echo "## FaceSwap Studio clean build"
+            echo "FaceSwap Studio 1.0.0 production verification"
+            echo "commit=${{ github.sha }}"
+            echo "source_audit=PASS"
+            echo "arcface_real_cpu_inference=PASS"
+            echo "inswapper_real_cpu_inference=PASS"
+            echo "android_generated_portrait_detection=PASS"
+            echo "android_isolated_process_swap_under_60s=PASS"
+            echo "android_second_varied_swap_under_60s=PASS"
+            echo "android_corrupt_input_fast_error=PASS"
+            echo "android_cancellation_under_15s=PASS"
+            echo "unit_tests=PASS"
+            echo "lint_debug_and_release=PASS"
+            echo "release_signature=PASS"
+            echo "zipalign_16k=PASS"
+            echo "arm64_only=PASS"
+            echo "network_permissions_absent=PASS"
             echo
-            echo "- Source audit: passed"
-            echo "- Real ArcFace CPU inference: passed"
-            echo "- Real INSwapper CPU inference: passed"
-            echo "- Unit tests and Android lint: passed"
-            echo "- APK signature and payload: passed"
+            cat faceswap-e2e-metrics.txt
             echo
-            echo '```text'
-            cat dist/FaceSwap-Studio-1.0.0-arm64.apk.sha256
-            echo '```'
+            cat apk-signature.txt
+          } > dist/verification-summary.txt
+          {
+            echo "## FaceSwap Studio production release"
+            echo
+            echo "- Fresh clean-room source audit: passed"
+            echo "- Real Android swaps with newly generated portraits: passed"
+            echo "- 60-second performance gates: passed"
+            echo "- Corrupt input and cancellation gates: passed"
+            echo "- Unit tests and debug/release lint: passed"
+            echo "- Dedicated release signature, 16 KB alignment and payload: passed"
+            echo
+            echo '~~~text'
+            cat dist/FaceSwap-Studio-1.0.0-RELEASE-arm64.apk.sha256
+            echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload verified APK
-        uses: actions/upload-artifact@v4
+      - name: Upload production APK only after every gate passed
+        uses: actions/upload-artifact@v7
         with:
-          name: FaceSwap-Studio-1.0.0-VERIFIED
+          name: FaceSwap-Studio-1.0.0-PRODUCTION-VERIFIED
           path: dist/
           if-no-files-found: error
-          retention-days: 30
+          compression-level: 0
+          retention-days: 90
+
+      - name: Upload failure evidence without an APK
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: FaceSwap-Studio-FAILED-EVIDENCE-${{ github.run_id }}
+          path: |
+            model-verification.txt
+            faceswap-e2e-metrics.txt
+            apk-signature.txt
+            apk-badging.txt
+            apk-manifest.txt
+            app/build/reports/tests/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,4 +1,5 @@
 /.gradle/
+/.venv/
 /.idea/
 /local.properties
 **/build/
@@ -13,5 +14,6 @@ app/src/main/assets/models/emap.metadata.json
 *.apk
 *.aab
 *.sha256
+!/release-certificate.sha256
 __pycache__/
 *.py[cod]

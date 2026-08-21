@@ -35,6 +35,7 @@ public final class InferenceService extends Service {
     private static final String CHANNEL_ID = "faceswap_processing";
     private static final int NOTIFICATION_ID = 1042;
     private static final long HEARTBEAT_INTERVAL_MS = 5_000L;
+    private static final long TOTAL_JOB_TIMEOUT_MS = 120_000L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean finishing = new AtomicBoolean(false);
@@ -46,6 +47,7 @@ public final class InferenceService extends Service {
     private volatile String currentMessage;
     private volatile long stageStartedAt;
     private Runnable timeoutRunnable;
+    private Runnable totalTimeoutRunnable;
     private Runnable heartbeatRunnable;
 
     @Override
@@ -97,6 +99,7 @@ public final class InferenceService extends Service {
         currentMessage = "Face-Swap wird vorbereitet …";
         stageStartedAt = SystemClock.elapsedRealtime();
         startForeground(NOTIFICATION_ID, buildNotification(currentProgress, currentMessage));
+        armTotalTimeout();
 
         executor.execute(() -> executeJob(
             new File(sourcePath),
@@ -147,6 +150,20 @@ public final class InferenceService extends Service {
             }
         };
         mainHandler.postDelayed(timeoutRunnable, timeoutMillis);
+    }
+
+    private void armTotalTimeout() {
+        if (totalTimeoutRunnable != null) {
+            mainHandler.removeCallbacks(totalTimeoutRunnable);
+        }
+        totalTimeoutRunnable = () -> {
+            if (finishing.compareAndSet(false, true)) {
+                String message = "Der Face-Swap hat die feste Zwei-Minuten-Grenze überschritten und wurde beendet.";
+                send(receiver, InferenceContract.RESULT_ERROR, currentProgress, message, null);
+                stopAndReleaseProcess();
+            }
+        };
+        mainHandler.postDelayed(totalTimeoutRunnable, TOTAL_JOB_TIMEOUT_MS);
     }
 
     private void armHeartbeat() {
@@ -206,6 +223,9 @@ public final class InferenceService extends Service {
     private void cancelTimers() {
         if (timeoutRunnable != null) {
             mainHandler.removeCallbacks(timeoutRunnable);
+        }
+        if (totalTimeoutRunnable != null) {
+            mainHandler.removeCallbacks(totalTimeoutRunnable);
         }
         if (heartbeatRunnable != null) {
             mainHandler.removeCallbacks(heartbeatRunnable);

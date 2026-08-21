@@ -2,6 +2,18 @@ plugins {
     id("com.android.application")
 }
 
+val faceswapAbi = providers.gradleProperty("faceswapAbi").orElse("arm64-v8a")
+val releaseStoreFile = providers.environmentVariable("RELEASE_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("RELEASE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").orNull
+val releaseSigningAvailable = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.greenbuddy.faceswapstudio"
     compileSdk = 36
@@ -17,12 +29,34 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += faceswapAbi.get()
+                .split(',')
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+        }
+    }
+
+    signingConfigs {
+        if (releaseSigningAvailable) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = false
+            }
         }
     }
 
     buildTypes {
         release {
+            if (releaseSigningAvailable) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            isDebuggable = false
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -44,6 +78,14 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+}
+
+tasks.matching { it.name == "packageRelease" || it.name == "assembleRelease" }.configureEach {
+    doFirst {
+        check(releaseSigningAvailable) {
+            "Release signing variables are required; an unsigned or debug-signed final APK is forbidden."
+        }
     }
 }
 
@@ -84,4 +126,6 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.0")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -18,6 +19,7 @@ REQUIRED = (
     "app/src/main/java/com/greenbuddy/faceswapstudio/engine/FaceSwapEngine.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/service/InferenceService.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/ui/MainActivity.java",
+    "app/src/androidTest/java/com/greenbuddy/faceswapstudio/FaceSwapEndToEndTest.java",
     ".github/workflows/android-build.yml",
 )
 FORBIDDEN_SOURCE_MARKERS = (
@@ -32,6 +34,14 @@ FORBIDDEN_NETWORK_PERMISSIONS = (
     "android.permission.INTERNET",
 )
 RASTER_SUFFIXES = {".avif", ".gif", ".heic", ".jpeg", ".jpg", ".png", ".webp"}
+TEST_RASTER_SHA256 = {
+    "app/src/androidTest/assets/generated_faces/source.jpg":
+        "d897527fd27203c4ce9805563c0c16c753cc56d192194956834e4dc3373c84e2",
+    "app/src/androidTest/assets/generated_faces/target_a.jpg":
+        "f1725324a7b1f768a901ab70141325fb8f217ab513e49cca1653bdb25a1da806",
+    "app/src/androidTest/assets/generated_faces/target_b.jpg":
+        "248d1e59b382ea16249858937646758aaf29193d093a4ccc43e807102bdd5a60",
+}
 
 
 def main() -> int:
@@ -51,24 +61,36 @@ def main() -> int:
             errors.append(f"network permission is not explicitly removed: {permission}")
 
     for path in ROOT.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or "build" in path.parts:
+        if (
+            not path.is_file()
+            or any(part in {".git", ".gradle", ".venv", "build"} for part in path.parts)
+        ):
             continue
+        relative = path.relative_to(ROOT).as_posix()
         if path.suffix == ".part":
-            errors.append(f"partial download is forbidden in the source tree: {path.relative_to(ROOT)}")
-        if "app" in path.parts and "res" in path.parts and path.suffix.lower() in RASTER_SUFFIXES:
-            errors.append(f"raster image is forbidden in the clean source tree: {path.relative_to(ROOT)}")
+            errors.append(f"partial download is forbidden in the source tree: {relative}")
+        if path.suffix.lower() in RASTER_SUFFIXES:
+            expected_hash = TEST_RASTER_SHA256.get(relative)
+            if expected_hash is None:
+                errors.append(f"unapproved raster image is forbidden in the clean source tree: {relative}")
+            elif hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+                errors.append(f"generated test portrait hash mismatch: {relative}")
         if path.suffix == ".xml":
             try:
                 ET.parse(path)
             except ET.ParseError as error:
-                errors.append(f"invalid XML {path.relative_to(ROOT)}: {error}")
+                errors.append(f"invalid XML {relative}: {error}")
         if path.suffix in {".java", ".kt", ".kts", ".xml", ".yml", ".yaml"}:
             text = path.read_text(encoding="utf-8")
             for marker in FORBIDDEN_SOURCE_MARKERS:
                 if marker in text:
-                    errors.append(f"old implementation marker {marker!r} in {path.relative_to(ROOT)}")
+                    errors.append(f"old implementation marker {marker!r} in {relative}")
             if "\ufeff" in text:
-                errors.append(f"UTF-8 BOM found in {path.relative_to(ROOT)}")
+                errors.append(f"UTF-8 BOM found in {relative}")
+
+    for relative in TEST_RASTER_SHA256:
+        if not (ROOT / relative).is_file():
+            errors.append(f"missing generated end-to-end test portrait: {relative}")
 
     java_root = ROOT / "app/src/main/java"
     for path in java_root.rglob("*.java"):
@@ -86,7 +108,11 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print(f"SOURCE AUDIT OK: {len(workflows)} workflow, valid XML, no old implementation markers")
+    print(
+        "SOURCE AUDIT OK: "
+        f"{len(workflows)} workflow, valid XML, no old implementation markers, "
+        f"{len(TEST_RASTER_SHA256)} hash-locked new test portraits"
+    )
     return 0
 
 

@@ -9,7 +9,7 @@ import java.io.IOException;
 
 public final class FaceSwapEngine {
     private static final long QUICK_STAGE_TIMEOUT_MS = 90_000L;
-    private static final long MODEL_STAGE_TIMEOUT_MS = 360_000L;
+    private static final long MODEL_STAGE_TIMEOUT_MS = 90_000L;
 
     private final Context context;
 
@@ -67,7 +67,7 @@ public final class FaceSwapEngine {
                 targetAligned = alignedTarget.getBitmap();
                 progress.update(
                     ProgressPlan.SWAP_MODEL_READY,
-                    "KI-Modell arbeitet · das kann auf CPU einige Minuten dauern",
+                    "KI-Modell arbeitet · Fortschritt bleibt sichtbar",
                     MODEL_STAGE_TIMEOUT_MS
                 );
 
