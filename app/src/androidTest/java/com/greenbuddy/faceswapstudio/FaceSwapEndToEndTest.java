@@ -14,6 +14,7 @@ import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Parcel;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.util.Log;
@@ -170,7 +171,7 @@ public final class FaceSwapEndToEndTest {
             .putExtra(InferenceContract.EXTRA_SOURCE_PATH, source.getAbsolutePath())
             .putExtra(InferenceContract.EXTRA_TARGET_PATH, target.getAbsolutePath())
             .putExtra(InferenceContract.EXTRA_OUTPUT_PATH, output.getAbsolutePath())
-            .putExtra(InferenceContract.EXTRA_RECEIVER, receiver);
+            .putExtra(InferenceContract.EXTRA_RECEIVER, asFrameworkReceiverProxy(receiver));
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
             ContextCompat.startForegroundService(app, start));
 
@@ -184,6 +185,17 @@ public final class FaceSwapEndToEndTest {
 
         assertTrue("inference process did not reach a terminal state", terminal.await(TERMINAL_WAIT_SECONDS, TimeUnit.SECONDS));
         return result;
+    }
+
+    private static ResultReceiver asFrameworkReceiverProxy(ResultReceiver localReceiver) {
+        Parcel parcel = Parcel.obtain();
+        try {
+            localReceiver.writeToParcel(parcel, 0);
+            parcel.setDataPosition(0);
+            return ResultReceiver.CREATOR.createFromParcel(parcel);
+        } finally {
+            parcel.recycle();
+        }
     }
 
     private static void assertHealthyProgress(JobResult result) {
