@@ -28,12 +28,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class FaceSwapViewModel extends AndroidViewModel {
-    private static final long MAX_INPUT_BYTES = 80L * 1024L * 1024L;
+    private static final long MAX_FACE_BYTES = 80L * 1024L * 1024L;
+    private static final long MAX_VIDEO_BYTES = 1_500L * 1024L * 1024L;
     private static final long UI_WATCHDOG_MS = 30_000L;
     private static final long UI_WATCHDOG_POLL_MS = 10_000L;
 
     private final MutableLiveData<ProcessingState> state = new MutableLiveData<>(
-        ProcessingState.ready("Bereit · zwei Bilder auswählen")
+        ProcessingState.ready("Bereit · zuerst Video auswählen")
     );
     private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -51,13 +52,17 @@ public final class FaceSwapViewModel extends AndroidViewModel {
         return state;
     }
 
-    public void start(Uri sourceUri, Uri targetUri, boolean consentConfirmed) {
+    public void start(Uri videoUri, Uri faceUri, boolean consentConfirmed) {
         ProcessingState current = state.getValue();
         if (current != null && current.isBusy()) {
             return;
         }
-        if (sourceUri == null || targetUri == null) {
-            state.setValue(ProcessingState.error("Bitte zuerst Quellbild und Zielbild auswählen."));
+        if (videoUri == null) {
+            state.setValue(ProcessingState.error("Bitte zuerst ein MP4-Video auswählen."));
+            return;
+        }
+        if (faceUri == null) {
+            state.setValue(ProcessingState.error("Bitte danach ein Foto mit dem neuen Gesicht auswählen."));
             return;
         }
         if (!consentConfirmed) {
@@ -65,7 +70,7 @@ public final class FaceSwapViewModel extends AndroidViewModel {
             return;
         }
 
-        state.setValue(ProcessingState.preparing("Bilder werden in den geschützten App-Speicher kopiert …"));
+        state.setValue(ProcessingState.preparing("Video und Gesichtsfoto werden sicher vorbereitet …"));
         String jobId = UUID.randomUUID().toString();
         activeJobId = jobId;
         lastServiceUpdate = SystemClock.elapsedRealtime();
@@ -73,7 +78,11 @@ public final class FaceSwapViewModel extends AndroidViewModel {
         fileExecutor.execute(() -> {
             File jobDirectory = null;
             try {
-                File jobsDirectory = new File(getApplication().getCacheDir(), "jobs");
+                File cacheRoot = getApplication().getExternalCacheDir();
+                if (cacheRoot == null) {
+                    cacheRoot = getApplication().getCacheDir();
+                }
+                File jobsDirectory = new File(cacheRoot, "video-jobs");
                 if (!jobsDirectory.mkdirs() && !jobsDirectory.isDirectory()) {
                     throw new IOException("Jobs directory could not be created.");
                 }
@@ -82,21 +91,21 @@ public final class FaceSwapViewModel extends AndroidViewModel {
                 if (!jobDirectory.mkdirs() && !jobDirectory.isDirectory()) {
                     throw new IOException("Job directory could not be created.");
                 }
-                File sourceFile = new File(jobDirectory, "source.image");
-                File targetFile = new File(jobDirectory, "target.image");
-                File outputFile = new File(jobDirectory, "faceswap-result.jpg");
-                copyUri(sourceUri, sourceFile);
-                copyUri(targetUri, targetFile);
+                File videoFile = new File(jobDirectory, "target-video.mp4");
+                File faceFile = new File(jobDirectory, "source-face.image");
+                File outputFile = new File(jobDirectory, "faceswap-result.mp4");
+                copyUri(videoUri, videoFile, MAX_VIDEO_BYTES);
+                copyUri(faceUri, faceFile, MAX_FACE_BYTES);
 
                 if (!jobId.equals(activeJobId)) {
                     deleteRecursively(jobDirectory);
                     return;
                 }
-                mainHandler.post(() -> launchService(jobId, sourceFile, targetFile, outputFile));
+                mainHandler.post(() -> launchService(jobId, faceFile, videoFile, outputFile));
             } catch (Exception error) {
                 if (jobId.equals(activeJobId)) {
                     state.postValue(ProcessingState.error(
-                        "Die ausgewählten Bilder konnten nicht sicher geöffnet werden. Bitte erneut auswählen."
+                        "Video oder Gesichtsfoto konnten nicht geöffnet werden. Bitte die Dateien erneut auswählen."
                     ));
                     activeJobId = null;
                 }
@@ -121,7 +130,7 @@ public final class FaceSwapViewModel extends AndroidViewModel {
         state.setValue(ProcessingState.cancelled());
     }
 
-    private void launchService(String jobId, File source, File target, File output) {
+    private void launchService(String jobId, File facePhoto, File inputVideo, File output) {
         if (!jobId.equals(activeJobId)) {
             return;
         }
@@ -157,8 +166,8 @@ public final class FaceSwapViewModel extends AndroidViewModel {
         Intent start = new Intent(getApplication(), InferenceService.class)
             .setAction(InferenceContract.ACTION_START)
             .putExtra(InferenceContract.EXTRA_JOB_ID, jobId)
-            .putExtra(InferenceContract.EXTRA_SOURCE_PATH, source.getAbsolutePath())
-            .putExtra(InferenceContract.EXTRA_TARGET_PATH, target.getAbsolutePath())
+            .putExtra(InferenceContract.EXTRA_FACE_PATH, facePhoto.getAbsolutePath())
+            .putExtra(InferenceContract.EXTRA_VIDEO_PATH, inputVideo.getAbsolutePath())
             .putExtra(InferenceContract.EXTRA_OUTPUT_PATH, output.getAbsolutePath())
             .putExtra(InferenceContract.EXTRA_RECEIVER, resultReceiver);
         try {
@@ -190,7 +199,7 @@ public final class FaceSwapViewModel extends AndroidViewModel {
         }, UI_WATCHDOG_POLL_MS);
     }
 
-    private void copyUri(Uri source, File destination) throws IOException {
+    private void copyUri(Uri source, File destination, long maximumBytes) throws IOException {
         ContentResolver resolver = getApplication().getContentResolver();
         try (InputStream input = resolver.openInputStream(source);
              FileOutputStream output = new FileOutputStream(destination)) {
@@ -202,7 +211,7 @@ public final class FaceSwapViewModel extends AndroidViewModel {
             int count;
             while ((count = input.read(buffer)) != -1) {
                 total += count;
-                if (total > MAX_INPUT_BYTES) {
+                if (total > maximumBytes) {
                     throw new IOException("Input exceeds size limit.");
                 }
                 output.write(buffer, 0, count);

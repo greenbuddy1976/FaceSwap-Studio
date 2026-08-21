@@ -5,8 +5,8 @@ public final class InferenceContract {
     public static final String ACTION_CANCEL = "com.greenbuddy.faceswapstudio.action.CANCEL";
 
     public static final String EXTRA_JOB_ID = "job_id";
-    public static final String EXTRA_SOURCE_PATH = "source_path";
-    public static final String EXTRA_TARGET_PATH = "target_path";
+    public static final String EXTRA_FACE_PATH = "face_path";
+    public static final String EXTRA_VIDEO_PATH = "video_path";
     public static final String EXTRA_OUTPUT_PATH = "output_path";
     public static final String EXTRA_RECEIVER = "receiver";
 

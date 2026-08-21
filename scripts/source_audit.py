@@ -16,7 +16,9 @@ REQUIRED = (
     "build.gradle.kts",
     "app/build.gradle.kts",
     "app/src/main/AndroidManifest.xml",
-    "app/src/main/java/com/greenbuddy/faceswapstudio/engine/FaceSwapEngine.java",
+    "app/src/main/java/com/greenbuddy/faceswapstudio/video/VideoFaceSwapEngine.java",
+    "app/src/main/java/com/greenbuddy/faceswapstudio/video/AvcBitmapEncoder.java",
+    "app/src/main/java/com/greenbuddy/faceswapstudio/video/Mp4AudioMuxer.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/service/InferenceService.java",
     "app/src/main/java/com/greenbuddy/faceswapstudio/ui/MainActivity.java",
     "app/src/androidTest/java/com/greenbuddy/faceswapstudio/FaceSwapEndToEndTest.java",
@@ -42,6 +44,10 @@ TEST_RASTER_SHA256 = {
     "app/src/androidTest/assets/generated_faces/target_b.jpg":
         "248d1e59b382ea16249858937646758aaf29193d093a4ccc43e807102bdd5a60",
 }
+TEST_VIDEO_SHA256 = {
+    "app/src/androidTest/assets/generated_video/target-with-audio.mp4":
+        "a97a2ae6e01ccd9651aa9d07824a015eaba6fc359c160cee8fd35e09e0e36a1d",
+}
 
 
 def main() -> int:
@@ -65,6 +71,27 @@ def main() -> int:
     ).read_text(encoding="utf-8")
     if "MlKit.initialize(this);" not in inference_service:
         errors.append("isolated inference process must initialize ML Kit explicitly")
+    if "VideoFaceSwapEngine" not in inference_service:
+        errors.append("inference service must execute the video face-swap engine")
+
+    obsolete_engine = ROOT / "app/src/main/java/com/greenbuddy/faceswapstudio/engine/FaceSwapEngine.java"
+    if obsolete_engine.exists():
+        errors.append("photo-to-photo FaceSwapEngine.java is forbidden")
+
+    main_activity = (
+        ROOT / "app/src/main/java/com/greenbuddy/faceswapstudio/ui/MainActivity.java"
+    ).read_text(encoding="utf-8")
+    for required_marker in (
+        'new ActivityResultContracts.CreateDocument("video/mp4")',
+        'videoPicker.launch(new String[] { "video/mp4" })',
+        "faceButton.setEnabled(!busy && videoUri != null)",
+        '"FaceSwap_Video_"',
+    ):
+        if required_marker not in main_activity:
+            errors.append(f"video-only UI marker is missing: {required_marker}")
+    for forbidden_marker in ("targetPreview", "sourcePreview", 'CreateDocument("image/jpeg")'):
+        if forbidden_marker in main_activity:
+            errors.append(f"photo-to-photo UI marker is forbidden: {forbidden_marker}")
 
     for path in ROOT.rglob("*"):
         if (
@@ -81,6 +108,12 @@ def main() -> int:
                 errors.append(f"unapproved raster image is forbidden in the clean source tree: {relative}")
             elif hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
                 errors.append(f"generated test portrait hash mismatch: {relative}")
+        if path.suffix.lower() == ".mp4" and relative.startswith("app/src/androidTest/assets/"):
+            expected_hash = TEST_VIDEO_SHA256.get(relative)
+            if expected_hash is None:
+                errors.append(f"unapproved MP4 is forbidden in Android test assets: {relative}")
+            elif hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+                errors.append(f"generated test video hash mismatch: {relative}")
         if path.suffix == ".xml":
             try:
                 ET.parse(path)
@@ -97,6 +130,20 @@ def main() -> int:
     for relative in TEST_RASTER_SHA256:
         if not (ROOT / relative).is_file():
             errors.append(f"missing generated end-to-end test portrait: {relative}")
+    for relative in TEST_VIDEO_SHA256:
+        if not (ROOT / relative).is_file():
+            errors.append(f"missing generated end-to-end test video: {relative}")
+
+    end_to_end_test = (
+        ROOT / "app/src/androidTest/java/com/greenbuddy/faceswapstudio/FaceSwapEndToEndTest.java"
+    ).read_text(encoding="utf-8")
+    for marker in (
+        "assertAudioPayloadUnchanged",
+        "compressed audio payload changed",
+        "FACESWAP_VIDEO_E2E_FULL_PASS",
+    ):
+        if marker not in end_to_end_test:
+            errors.append(f"video end-to-end assertion is missing: {marker}")
 
     java_root = ROOT / "app/src/main/java"
     for path in java_root.rglob("*.java"):
@@ -117,7 +164,8 @@ def main() -> int:
     print(
         "SOURCE AUDIT OK: "
         f"{len(workflows)} workflow, valid XML, no old implementation markers, "
-        f"{len(TEST_RASTER_SHA256)} hash-locked new test portraits"
+        f"{len(TEST_RASTER_SHA256)} hash-locked new test portraits and "
+        f"{len(TEST_VIDEO_SHA256)} hash-locked MP4 with audio"
     )
     return 0
 

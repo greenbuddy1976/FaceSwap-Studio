@@ -1,8 +1,8 @@
 package com.greenbuddy.faceswapstudio.ui;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -11,8 +11,10 @@ import android.view.View;
 import android.widget.CheckBox;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.MediaController;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.VideoView;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -35,18 +37,18 @@ import java.util.Date;
 import java.util.Locale;
 
 public final class MainActivity extends AppCompatActivity {
-    private static final String STATE_SOURCE_URI = "source_uri";
-    private static final String STATE_TARGET_URI = "target_uri";
+    private static final String STATE_VIDEO_URI = "video_uri";
+    private static final String STATE_FACE_URI = "face_uri";
 
-    private Uri sourceUri;
-    private Uri targetUri;
+    private Uri videoUri;
+    private Uri faceUri;
     private String outputPath;
 
-    private ImageView sourcePreview;
-    private ImageView targetPreview;
-    private ImageView resultPreview;
-    private MaterialButton sourceButton;
-    private MaterialButton targetButton;
+    private VideoView videoPreview;
+    private ImageView facePreview;
+    private VideoView resultVideoPreview;
+    private MaterialButton videoButton;
+    private MaterialButton faceButton;
     private MaterialButton startButton;
     private MaterialButton cancelButton;
     private MaterialButton saveButton;
@@ -56,15 +58,20 @@ public final class MainActivity extends AppCompatActivity {
     private LinearLayout resultPanel;
 
     private FaceSwapViewModel viewModel;
-    private boolean selectingSource;
+    private boolean busy;
 
-    private final ActivityResultLauncher<String[]> imagePicker = registerForActivityResult(
+    private final ActivityResultLauncher<String[]> videoPicker = registerForActivityResult(
         new ActivityResultContracts.OpenDocument(),
-        this::onImagePicked
+        this::onVideoPicked
+    );
+
+    private final ActivityResultLauncher<String[]> facePicker = registerForActivityResult(
+        new ActivityResultContracts.OpenDocument(),
+        this::onFacePicked
     );
 
     private final ActivityResultLauncher<String> saveDocument = registerForActivityResult(
-        new ActivityResultContracts.CreateDocument("image/jpeg"),
+        new ActivityResultContracts.CreateDocument("video/mp4"),
         this::onSaveLocationChosen
     );
 
@@ -85,51 +92,60 @@ public final class MainActivity extends AppCompatActivity {
         bindViews();
 
         if (savedInstanceState != null) {
-            String source = savedInstanceState.getString(STATE_SOURCE_URI);
-            String target = savedInstanceState.getString(STATE_TARGET_URI);
-            sourceUri = source == null ? null : Uri.parse(source);
-            targetUri = target == null ? null : Uri.parse(target);
-            showSelectedImages();
+            String video = savedInstanceState.getString(STATE_VIDEO_URI);
+            String face = savedInstanceState.getString(STATE_FACE_URI);
+            videoUri = video == null ? null : Uri.parse(video);
+            faceUri = face == null ? null : Uri.parse(face);
+            showSelections();
         }
 
-        sourceButton.setOnClickListener(view -> {
-            selectingSource = true;
-            imagePicker.launch(new String[] { "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif" });
-        });
-        targetButton.setOnClickListener(view -> {
-            selectingSource = false;
-            imagePicker.launch(new String[] { "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif" });
-        });
+        videoButton.setOnClickListener(view -> videoPicker.launch(new String[] { "video/mp4" }));
+        faceButton.setOnClickListener(view -> facePicker.launch(new String[] {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+        }));
+        consentCheck.setOnCheckedChangeListener((button, checked) -> updateInputControls());
         startButton.setOnClickListener(view -> startWithNotificationPermission());
         cancelButton.setOnClickListener(view -> viewModel.cancel());
         saveButton.setOnClickListener(view -> {
             if (outputPath != null) {
                 String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date());
-                saveDocument.launch("FaceSwap_" + timestamp + ".jpg");
+                saveDocument.launch("FaceSwap_Video_" + timestamp + ".mp4");
             }
         });
 
         viewModel = new ViewModelProvider(this).get(FaceSwapViewModel.class);
         viewModel.getState().observe(this, this::renderState);
+        updateInputControls();
     }
 
     @Override
     protected void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
-        if (sourceUri != null) {
-            outState.putString(STATE_SOURCE_URI, sourceUri.toString());
+        if (videoUri != null) {
+            outState.putString(STATE_VIDEO_URI, videoUri.toString());
         }
-        if (targetUri != null) {
-            outState.putString(STATE_TARGET_URI, targetUri.toString());
+        if (faceUri != null) {
+            outState.putString(STATE_FACE_URI, faceUri.toString());
         }
     }
 
+    @Override
+    protected void onStop() {
+        super.onStop();
+        videoPreview.pause();
+        resultVideoPreview.pause();
+    }
+
     private void bindViews() {
-        sourcePreview = findViewById(R.id.sourcePreview);
-        targetPreview = findViewById(R.id.targetPreview);
-        resultPreview = findViewById(R.id.resultPreview);
-        sourceButton = findViewById(R.id.sourceButton);
-        targetButton = findViewById(R.id.targetButton);
+        videoPreview = findViewById(R.id.videoPreview);
+        facePreview = findViewById(R.id.facePreview);
+        resultVideoPreview = findViewById(R.id.resultVideoPreview);
+        videoButton = findViewById(R.id.videoButton);
+        faceButton = findViewById(R.id.faceButton);
         startButton = findViewById(R.id.startButton);
         cancelButton = findViewById(R.id.cancelButton);
         saveButton = findViewById(R.id.saveButton);
@@ -139,37 +155,64 @@ public final class MainActivity extends AppCompatActivity {
         resultPanel = findViewById(R.id.resultPanel);
     }
 
-    private void onImagePicked(Uri uri) {
+    private void onVideoPicked(Uri uri) {
         if (uri == null) {
             return;
         }
-        try {
-            getContentResolver().takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (SecurityException ignored) {
-            // Some document providers grant access for the Activity lifetime only; copying happens immediately on start.
-        }
-        if (selectingSource) {
-            sourceUri = uri;
-            sourcePreview.setImageURI(uri);
-        } else {
-            targetUri = uri;
-            targetPreview.setImageURI(uri);
-        }
-        statusText.setText(R.string.status_image_selected);
+        persistReadPermission(uri);
+        videoUri = uri;
+        configurePreview(videoPreview, uri, false);
+        statusText.setText(R.string.status_video_selected);
         statusText.setTextColor(Color.WHITE);
+        updateInputControls();
     }
 
-    private void showSelectedImages() {
-        if (sourceUri != null) {
-            sourcePreview.setImageURI(sourceUri);
+    private void onFacePicked(Uri uri) {
+        if (uri == null) {
+            return;
         }
-        if (targetUri != null) {
-            targetPreview.setImageURI(targetUri);
+        persistReadPermission(uri);
+        faceUri = uri;
+        facePreview.setImageURI(uri);
+        statusText.setText(R.string.status_face_selected);
+        statusText.setTextColor(Color.WHITE);
+        updateInputControls();
+    }
+
+    private void persistReadPermission(Uri uri) {
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException ignored) {
+            // Some providers grant access for this Activity only; the app copies on start.
         }
+    }
+
+    private void showSelections() {
+        if (videoUri != null) {
+            configurePreview(videoPreview, videoUri, false);
+        }
+        if (faceUri != null) {
+            facePreview.setImageURI(faceUri);
+        }
+    }
+
+    private void configurePreview(VideoView view, Uri uri, boolean autoplay) {
+        MediaController controller = new MediaController(this);
+        controller.setAnchorView(view);
+        view.setMediaController(controller);
+        view.setVideoURI(uri);
+        view.setOnPreparedListener(player -> {
+            player.setLooping(autoplay);
+            if (autoplay) {
+                view.start();
+            } else {
+                view.seekTo(1);
+            }
+        });
     }
 
     private void startWithNotificationPermission() {
-        if (sourceUri == null || targetUri == null || !consentCheck.isChecked()) {
+        if (videoUri == null || faceUri == null || !consentCheck.isChecked()) {
             startSwap();
             return;
         }
@@ -183,15 +226,12 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void startSwap() {
-        viewModel.start(sourceUri, targetUri, consentCheck.isChecked());
+        viewModel.start(videoUri, faceUri, consentCheck.isChecked());
     }
 
     private void renderState(ProcessingState state) {
-        boolean busy = state.isBusy();
-        sourceButton.setEnabled(!busy);
-        targetButton.setEnabled(!busy);
-        startButton.setEnabled(!busy);
-        consentCheck.setEnabled(!busy);
+        busy = state.isBusy();
+        updateInputControls();
         cancelButton.setVisibility(busy ? View.VISIBLE : View.GONE);
         progressBar.setProgressCompat(state.getProgress(), true);
         statusText.setText(state.getMessage());
@@ -203,12 +243,23 @@ public final class MainActivity extends AppCompatActivity {
 
         if (state.getMode() == ProcessingState.Mode.SUCCESS && state.getOutputPath() != null) {
             outputPath = state.getOutputPath();
-            resultPreview.setImageBitmap(BitmapFactory.decodeFile(outputPath));
+            configurePreview(resultVideoPreview, Uri.fromFile(new File(outputPath)), true);
             resultPanel.setVisibility(View.VISIBLE);
-        } else if (state.getMode() == ProcessingState.Mode.PREPARING || state.getMode() == ProcessingState.Mode.RUNNING) {
+        } else if (state.getMode() == ProcessingState.Mode.PREPARING
+            || state.getMode() == ProcessingState.Mode.RUNNING) {
+            resultVideoPreview.stopPlayback();
             resultPanel.setVisibility(View.GONE);
             outputPath = null;
         }
+    }
+
+    private void updateInputControls() {
+        videoButton.setEnabled(!busy);
+        faceButton.setEnabled(!busy && videoUri != null);
+        consentCheck.setEnabled(!busy);
+        startButton.setEnabled(
+            !busy && videoUri != null && faceUri != null && consentCheck.isChecked()
+        );
     }
 
     private void onSaveLocationChosen(Uri destination) {
@@ -222,20 +273,24 @@ public final class MainActivity extends AppCompatActivity {
                 if (output == null) {
                     throw new IOException("No output stream.");
                 }
-                byte[] buffer = new byte[64 * 1024];
+                byte[] buffer = new byte[256 * 1024];
                 int count;
                 while ((count = input.read(buffer)) != -1) {
                     output.write(buffer, 0, count);
                 }
                 output.flush();
-                runOnUiThread(() -> Toast.makeText(this, "Ergebnis gespeichert.", Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(
+                    this,
+                    R.string.video_saved,
+                    Toast.LENGTH_LONG
+                ).show());
             } catch (IOException error) {
                 runOnUiThread(() -> Toast.makeText(
                     this,
-                    "Speichern fehlgeschlagen. Bitte einen anderen Ordner wählen.",
+                    R.string.save_failed,
                     Toast.LENGTH_LONG
                 ).show());
             }
-        }, "faceswap-save").start();
+        }, "faceswap-video-save").start();
     }
 }

@@ -62,7 +62,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/source_title"
+                    android:text="@string/video_title"
                     android:textColor="@color/white"
                     android:textSize="19sp"
                     android:textStyle="bold" />
@@ -71,26 +71,25 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="@string/source_help"
+                    android:text="@string/video_help"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
-                <ImageView
-                    android:id="@+id/sourcePreview"
+                <VideoView
+                    android:id="@+id/videoPreview"
                     android:layout_width="match_parent"
-                    android:layout_height="210dp"
+                    android:layout_height="260dp"
                     android:layout_marginTop="12dp"
                     android:background="@drawable/image_background"
-                    android:contentDescription="@string/source_title"
-                    android:scaleType="centerCrop" />
+                    android:contentDescription="@string/video_title" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/sourceButton"
+                    android:id="@+id/videoButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:minHeight="54dp"
-                    android:text="@string/source_choose" />
+                    android:text="@string/video_choose" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -112,7 +111,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/target_title"
+                    android:text="@string/face_title"
                     android:textColor="@color/white"
                     android:textSize="19sp"
                     android:textStyle="bold" />
@@ -121,26 +120,27 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:text="@string/target_help"
+                    android:text="@string/face_help"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
                 <ImageView
-                    android:id="@+id/targetPreview"
+                    android:id="@+id/facePreview"
                     android:layout_width="match_parent"
-                    android:layout_height="260dp"
+                    android:layout_height="210dp"
                     android:layout_marginTop="12dp"
                     android:background="@drawable/image_background"
-                    android:contentDescription="@string/target_title"
+                    android:contentDescription="@string/face_title"
                     android:scaleType="centerCrop" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/targetButton"
+                    android:id="@+id/faceButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
                     android:minHeight="54dp"
-                    android:text="@string/target_choose" />
+                    android:enabled="false"
+                    android:text="@string/face_choose" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -216,15 +216,13 @@
                 android:textSize="19sp"
                 android:textStyle="bold" />
 
-            <ImageView
-                android:id="@+id/resultPreview"
+            <VideoView
+                android:id="@+id/resultVideoPreview"
                 android:layout_width="match_parent"
                 android:layout_height="320dp"
                 android:layout_marginTop="12dp"
-                android:adjustViewBounds="true"
                 android:background="@drawable/image_background"
-                android:contentDescription="@string/result_title"
-                android:scaleType="fitCenter" />
+                android:contentDescription="@string/result_title" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/saveButton"

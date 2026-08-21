@@ -35,7 +35,7 @@ public final class ProcessingState {
     }
 
     public static ProcessingState success(String outputPath) {
-        return new ProcessingState(Mode.SUCCESS, 100, "Fertig · Ergebnis kann gespeichert werden", outputPath);
+        return new ProcessingState(Mode.SUCCESS, 100, "Fertig · Face-Swap-Video kann gespeichert werden", outputPath);
     }
 
     public static ProcessingState error(String message) {

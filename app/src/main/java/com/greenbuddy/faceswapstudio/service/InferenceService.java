@@ -22,8 +22,8 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 import com.greenbuddy.faceswapstudio.R;
-import com.greenbuddy.faceswapstudio.engine.FaceSwapEngine;
 import com.greenbuddy.faceswapstudio.engine.FaceSwapException;
+import com.greenbuddy.faceswapstudio.video.VideoFaceSwapEngine;
 import com.google.mlkit.common.MlKit;
 
 import java.io.File;
@@ -36,7 +36,7 @@ public final class InferenceService extends Service {
     private static final String CHANNEL_ID = "faceswap_processing";
     private static final int NOTIFICATION_ID = 1042;
     private static final long HEARTBEAT_INTERVAL_MS = 5_000L;
-    private static final long TOTAL_JOB_TIMEOUT_MS = 120_000L;
+    private static final long TOTAL_JOB_TIMEOUT_MS = 30L * 60L * 1_000L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean finishing = new AtomicBoolean(false);
@@ -85,11 +85,11 @@ public final class InferenceService extends Service {
         }
 
         String jobId = intent.getStringExtra(InferenceContract.EXTRA_JOB_ID);
-        String sourcePath = intent.getStringExtra(InferenceContract.EXTRA_SOURCE_PATH);
-        String targetPath = intent.getStringExtra(InferenceContract.EXTRA_TARGET_PATH);
+        String facePath = intent.getStringExtra(InferenceContract.EXTRA_FACE_PATH);
+        String videoPath = intent.getStringExtra(InferenceContract.EXTRA_VIDEO_PATH);
         String outputPath = intent.getStringExtra(InferenceContract.EXTRA_OUTPUT_PATH);
         ResultReceiver resultReceiver = readReceiver(intent);
-        if (jobId == null || sourcePath == null || targetPath == null || outputPath == null || resultReceiver == null) {
+        if (jobId == null || facePath == null || videoPath == null || outputPath == null || resultReceiver == null) {
             send(resultReceiver, InferenceContract.RESULT_ERROR, 0, "Der Verarbeitungsauftrag ist unvollständig.", null);
             stopSelf();
             return START_NOT_STICKY;
@@ -104,17 +104,17 @@ public final class InferenceService extends Service {
         armTotalTimeout();
 
         executor.execute(() -> executeJob(
-            new File(sourcePath),
-            new File(targetPath),
+            new File(facePath),
+            new File(videoPath),
             new File(outputPath)
         ));
         return START_NOT_STICKY;
     }
 
-    private void executeJob(File source, File target, File output) {
+    private void executeJob(File facePhoto, File inputVideo, File output) {
         try {
-            FaceSwapEngine engine = new FaceSwapEngine(this);
-            engine.run(source, target, output, this::publishProgress);
+            VideoFaceSwapEngine engine = new VideoFaceSwapEngine(this);
+            engine.run(facePhoto, inputVideo, output, this::publishProgress);
             if (finishing.compareAndSet(false, true)) {
                 cancelTimers();
                 send(receiver, InferenceContract.RESULT_SUCCESS, 100, "Fertig", output.getAbsolutePath());
@@ -160,7 +160,7 @@ public final class InferenceService extends Service {
         }
         totalTimeoutRunnable = () -> {
             if (finishing.compareAndSet(false, true)) {
-                String message = "Der Face-Swap hat die feste Zwei-Minuten-Grenze überschritten und wurde beendet.";
+                String message = "Die Videoverarbeitung hat die feste 30-Minuten-Grenze überschritten und wurde beendet.";
                 send(receiver, InferenceContract.RESULT_ERROR, currentProgress, message, null);
                 stopAndReleaseProcess();
             }

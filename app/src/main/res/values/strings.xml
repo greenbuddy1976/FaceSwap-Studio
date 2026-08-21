@@ -1,22 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FaceSwap Studio</string>
-    <string name="app_subtitle">Privater Face-Swap direkt auf deinem Gerät</string>
-    <string name="privacy_note">Bilder werden nicht hochgeladen. Die Verarbeitung läuft vollständig auf diesem Gerät.</string>
-    <string name="source_title">1 · Quellgesicht</string>
-    <string name="source_help">Wähle ein gut sichtbares, möglichst frontales Gesicht.</string>
-    <string name="source_choose">Quellbild auswählen</string>
-    <string name="target_title">2 · Zielbild</string>
-    <string name="target_help">Das größte erkannte Gesicht im Zielbild wird ersetzt.</string>
-    <string name="target_choose">Zielbild auswählen</string>
-    <string name="consent">Ich darf beide Bilder verwenden und nutze das Ergebnis nicht täuschend oder ohne Einwilligung.</string>
-    <string name="start_swap">Face-Swap starten</string>
+    <string name="app_subtitle">Video Face Swap direkt auf deinem Gerät</string>
+    <string name="privacy_note">Video und Gesichtsfoto werden nicht hochgeladen. Die Verarbeitung läuft vollständig auf diesem Gerät.</string>
+    <string name="video_title">1 · Video auswählen</string>
+    <string name="video_help">Wähle zuerst das MP4-Video, in dem das sichtbare Hauptgesicht ersetzt werden soll.</string>
+    <string name="video_choose">MP4-Video auswählen</string>
+    <string name="face_title">2 · Neues Gesicht auswählen</string>
+    <string name="face_help">Wähle danach ein gut sichtbares, möglichst frontales Gesichtsfoto.</string>
+    <string name="face_choose">Gesichtsfoto auswählen</string>
+    <string name="consent">Ich darf Video und Gesichtsfoto verwenden und nutze das Ergebnis nicht täuschend oder ohne Einwilligung.</string>
+    <string name="start_swap">Video-Face-Swap starten</string>
     <string name="cancel">Abbrechen</string>
-    <string name="save">Ergebnis speichern</string>
-    <string name="status_ready">Bereit · zwei Bilder auswählen</string>
-    <string name="status_image_selected">Bild gewählt · fehlende Auswahl ergänzen oder starten</string>
-    <string name="result_title">Ergebnis</string>
+    <string name="save">MP4-Video speichern</string>
+    <string name="status_ready">Bereit · zuerst Video auswählen</string>
+    <string name="status_video_selected">Video gewählt · jetzt Gesichtsfoto auswählen</string>
+    <string name="status_face_selected">Gesichtsfoto gewählt · Einwilligung bestätigen und starten</string>
+    <string name="result_title">Fertiges Face-Swap-Video</string>
     <string name="notification_channel">FaceSwap-Verarbeitung</string>
     <string name="notification_title">FaceSwap wird erstellt</string>
     <string name="notification_denied">Benachrichtigungen sind aus. Der Fortschritt bleibt in der geöffneten App sichtbar.</string>
+    <string name="video_saved">Face-Swap-Video gespeichert.</string>
+    <string name="save_failed">Speichern fehlgeschlagen. Bitte einen anderen Ordner wählen.</string>
 </resources>

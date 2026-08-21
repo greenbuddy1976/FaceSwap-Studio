@@ -76,7 +76,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run full Android face-swap and failure-path tests
+      - name: Run real Android video face-swap, audio and failure-path tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -94,7 +94,7 @@ jobs:
             adb logcat -c
             gradle --no-daemon --no-build-cache --stacktrace -PfaceswapAbi=x86_64 connectedDebugAndroidTest
             adb logcat -d -v brief -s FaceSwapE2E:I '*:S' | tee faceswap-e2e-metrics.txt
-            grep -q 'FACESWAP_E2E_FULL_PASS' faceswap-e2e-metrics.txt
+            grep -q 'FACESWAP_VIDEO_E2E_FULL_PASS' faceswap-e2e-metrics.txt
 
       - name: Decode and validate dedicated release signing bundle
         shell: bash
@@ -164,23 +164,24 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/FaceSwap-Studio-1.0.0-RELEASE-arm64.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk
           (
             cd dist
-            sha256sum FaceSwap-Studio-1.0.0-RELEASE-arm64.apk > FaceSwap-Studio-1.0.0-RELEASE-arm64.apk.sha256
+            sha256sum FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk > FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk.sha256
           )
           cp app/src/main/assets/models/models.lock.json dist/models.lock.json
           cp release-certificate.sha256 dist/release-certificate.sha256
           {
-            echo "FaceSwap Studio 1.0.0 production verification"
+            echo "FaceSwap Studio VIDEO 1.1.0 production verification"
             echo "commit=${{ github.sha }}"
             echo "source_audit=PASS"
             echo "arcface_real_cpu_inference=PASS"
             echo "inswapper_real_cpu_inference=PASS"
-            echo "android_generated_portrait_detection=PASS"
-            echo "android_isolated_process_swap_under_60s=PASS"
-            echo "android_second_varied_swap_under_60s=PASS"
-            echo "android_corrupt_input_fast_error=PASS"
+            echo "android_generated_video_face_detection=PASS"
+            echo "android_isolated_video_swap_under_240s=PASS"
+            echo "android_output_h264_mp4=PASS"
+            echo "android_original_audio_payload_unchanged=PASS"
+            echo "android_corrupt_video_fast_error=PASS"
             echo "android_cancellation_under_15s=PASS"
             echo "unit_tests=PASS"
             echo "lint_debug_and_release=PASS"
@@ -194,28 +195,40 @@ jobs:
             cat apk-signature.txt
           } > dist/verification-summary.txt
           {
-            echo "## FaceSwap Studio production release"
+            echo "## FaceSwap Studio VIDEO 1.1.0 production release"
             echo
             echo "- Fresh clean-room source audit: passed"
-            echo "- Real Android swaps with newly generated portraits: passed"
-            echo "- 60-second performance gates: passed"
-            echo "- Corrupt input and cancellation gates: passed"
+            echo "- Real Android photo-to-video face swap: passed"
+            echo "- H.264 MP4 output and unchanged compressed audio: passed"
+            echo "- 240-second video performance gate: passed"
+            echo "- Corrupt video and cancellation gates: passed"
             echo "- Unit tests and debug/release lint: passed"
             echo "- Dedicated release signature, 16 KB alignment and payload: passed"
             echo
             echo '~~~text'
-            cat dist/FaceSwap-Studio-1.0.0-RELEASE-arm64.apk.sha256
+            cat dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk.sha256
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload production APK only after every gate passed
+      - name: Upload raw production APK only after every gate passed
+        id: upload-apk
         uses: actions/upload-artifact@v7
         with:
-          name: FaceSwap-Studio-1.0.0-PRODUCTION-VERIFIED
-          path: dist/
+          path: dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk
           if-no-files-found: error
-          compression-level: 0
+          archive: false
           retention-days: 90
+
+      - name: Verify the downloadable APK is byte-identical
+        shell: bash
+        run: |
+          EXPECTED="$(sha256sum dist/FaceSwap-Studio-VIDEO-1.1.0-RELEASE-arm64.apk | awk '{print $1}')"
+          test "${{ steps.upload-apk.outputs.artifact-digest }}" = "$EXPECTED"
+          {
+            echo
+            echo "Raw APK SHA-256: $EXPECTED"
+            echo "Download: ${{ steps.upload-apk.outputs.artifact-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload failure evidence without an APK
         if: failure()

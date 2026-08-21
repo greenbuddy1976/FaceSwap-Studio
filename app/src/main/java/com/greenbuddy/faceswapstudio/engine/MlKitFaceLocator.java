@@ -31,30 +31,13 @@ public final class MlKitFaceLocator implements AutoCloseable {
 
     public DetectedFace findLargest(Bitmap bitmap, String imageLabel) throws FaceSwapException {
         try {
-            List<Face> faces = Tasks.await(
-                detector.process(InputImage.fromBitmap(bitmap, 0)),
-                60,
-                TimeUnit.SECONDS
-            );
-            Face face = faces.stream()
-                .max(Comparator.comparingLong(item ->
-                    (long) item.getBoundingBox().width() * item.getBoundingBox().height()))
-                .orElseThrow(() -> new FaceSwapException(
+            Face face = detectLargest(bitmap);
+            if (face == null) {
+                throw new FaceSwapException(
                     "Im " + imageLabel + " wurde kein Gesicht erkannt. Bitte ein klareres Bild wählen."
-                ));
-
-            PointF firstEye = require(face, FaceLandmark.LEFT_EYE, imageLabel);
-            PointF secondEye = require(face, FaceLandmark.RIGHT_EYE, imageLabel);
-            PointF firstMouth = require(face, FaceLandmark.MOUTH_LEFT, imageLabel);
-            PointF secondMouth = require(face, FaceLandmark.MOUTH_RIGHT, imageLabel);
-            PointF[] landmarks = new PointF[] {
-                leftmost(firstEye, secondEye),
-                rightmost(firstEye, secondEye),
-                require(face, FaceLandmark.NOSE_BASE, imageLabel),
-                leftmost(firstMouth, secondMouth),
-                rightmost(firstMouth, secondMouth)
-            };
-            return new DetectedFace(face.getBoundingBox(), landmarks);
+                );
+            }
+            return convert(face, imageLabel, true);
         } catch (FaceSwapException error) {
             throw error;
         } catch (Exception error) {
@@ -65,12 +48,60 @@ public final class MlKitFaceLocator implements AutoCloseable {
         }
     }
 
-    private static PointF require(Face face, int type, String imageLabel) throws FaceSwapException {
+    /** Returns null when a video frame has no complete, usable face landmarks. */
+    public DetectedFace findLargestOrNull(Bitmap bitmap) throws FaceSwapException {
+        try {
+            Face face = detectLargest(bitmap);
+            return face == null ? null : convert(face, "Videobild", false);
+        } catch (FaceSwapException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new FaceSwapException("Die Gesichtserkennung in einem Videobild ist fehlgeschlagen.", error);
+        }
+    }
+
+    private Face detectLargest(Bitmap bitmap) throws Exception {
+        List<Face> faces = Tasks.await(
+            detector.process(InputImage.fromBitmap(bitmap, 0)),
+            60,
+            TimeUnit.SECONDS
+        );
+        return faces.stream()
+            .max(Comparator.comparingLong(item ->
+                (long) item.getBoundingBox().width() * item.getBoundingBox().height()))
+            .orElse(null);
+    }
+
+    private static DetectedFace convert(Face face, String imageLabel, boolean strict)
+        throws FaceSwapException {
+        PointF firstEye = landmark(face, FaceLandmark.LEFT_EYE);
+        PointF secondEye = landmark(face, FaceLandmark.RIGHT_EYE);
+        PointF nose = landmark(face, FaceLandmark.NOSE_BASE);
+        PointF firstMouth = landmark(face, FaceLandmark.MOUTH_LEFT);
+        PointF secondMouth = landmark(face, FaceLandmark.MOUTH_RIGHT);
+        if (firstEye == null || secondEye == null || nose == null
+            || firstMouth == null || secondMouth == null) {
+            if (strict) {
+                throw new FaceSwapException(
+                    "Das Gesicht im " + imageLabel + " ist zu stark gedreht oder teilweise verdeckt."
+                );
+            }
+            return null;
+        }
+        PointF[] landmarks = new PointF[] {
+            leftmost(firstEye, secondEye),
+            rightmost(firstEye, secondEye),
+            nose,
+            leftmost(firstMouth, secondMouth),
+            rightmost(firstMouth, secondMouth)
+        };
+        return new DetectedFace(face.getBoundingBox(), landmarks);
+    }
+
+    private static PointF landmark(Face face, int type) {
         FaceLandmark landmark = face.getLandmark(type);
         if (landmark == null) {
-            throw new FaceSwapException(
-                "Das Gesicht im " + imageLabel + " ist zu stark gedreht oder teilweise verdeckt."
-            );
+            return null;
         }
         PointF point = landmark.getPosition();
         return new PointF(point.x, point.y);

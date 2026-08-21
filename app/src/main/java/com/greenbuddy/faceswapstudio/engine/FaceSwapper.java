@@ -20,13 +20,19 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.TensorInfo;
 
-public final class FaceSwapper {
+public final class FaceSwapper implements AutoCloseable {
     private static final String MODEL_PATH = "models/inswapper_128_fp16.onnx";
     private static final String EMAP_PATH = "models/emap.bin";
     private static final int EMBEDDING_SIZE = 512;
     private static final int OUTPUT_SIZE = 3 * 128 * 128;
 
     private final AssetManager assets;
+    private OrtEnvironment environment;
+    private MappedAsset model;
+    private OrtSession.SessionOptions options;
+    private OrtSession session;
+    private InputNames inputNames;
+    private float[] emap;
 
     public FaceSwapper(AssetManager assets) {
         this.assets = assets;
@@ -36,40 +42,26 @@ public final class FaceSwapper {
         if (sourceEmbedding.length != EMBEDDING_SIZE) {
             throw new FaceSwapException("Das Gesichtsprofil besitzt nicht 512 Werte.");
         }
-        float[] latent = transformEmbedding(sourceEmbedding, loadEmap());
+        ensureInitialized();
+        float[] latent = transformEmbedding(sourceEmbedding, emap);
         float[] targetInput = ImageTransforms.toSwapTensor(alignedTarget);
-
-        OrtEnvironment environment;
-        try {
-            environment = OrtEnvironment.getEnvironment("faceswap-studio");
-        } catch (Throwable error) {
-            throw new FaceSwapException("ONNX Runtime konnte nicht gestartet werden.", error);
-        }
-
         try (
-            MappedAsset model = MappedAsset.open(assets, MODEL_PATH);
-            OrtSession.SessionOptions options = OnnxTools.stableCpuOptions();
-            OrtSession session = environment.createSession(model.getBuffer(), options)
+            OnnxTensor sourceTensor = OnnxTensor.createTensor(
+                environment,
+                OnnxTools.directFloatBuffer(latent),
+                new long[] { 1, EMBEDDING_SIZE }
+            );
+            OnnxTensor targetTensor = OnnxTensor.createTensor(
+                environment,
+                OnnxTools.directFloatBuffer(targetInput),
+                new long[] { 1, 3, 128, 128 }
+            )
         ) {
-            InputNames names = resolveInputNames(session);
-            try (
-                OnnxTensor sourceTensor = OnnxTensor.createTensor(
-                    environment,
-                    OnnxTools.directFloatBuffer(latent),
-                    new long[] { 1, EMBEDDING_SIZE }
-                );
-                OnnxTensor targetTensor = OnnxTensor.createTensor(
-                    environment,
-                    OnnxTools.directFloatBuffer(targetInput),
-                    new long[] { 1, 3, 128, 128 }
-                )
-            ) {
-                Map<String, OnnxTensor> inputs = new HashMap<>();
-                inputs.put(names.source, sourceTensor);
-                inputs.put(names.target, targetTensor);
-                try (OrtSession.Result result = session.run(inputs)) {
-                    return OnnxTools.copyFloatOutput(result.get(0), OUTPUT_SIZE);
-                }
+            Map<String, OnnxTensor> inputs = new HashMap<>();
+            inputs.put(inputNames.source, sourceTensor);
+            inputs.put(inputNames.target, targetTensor);
+            try (OrtSession.Result result = session.run(inputs)) {
+                return OnnxTools.copyFloatOutput(result.get(0), OUTPUT_SIZE);
             }
         } catch (FaceSwapException error) {
             throw error;
@@ -80,6 +72,35 @@ public final class FaceSwapper {
                 "Zu wenig Arbeitsspeicher für das Face-Swap-Modell. Andere Apps schließen und erneut versuchen.",
                 error
             );
+        }
+    }
+
+    private synchronized void ensureInitialized() throws FaceSwapException {
+        if (session != null) {
+            return;
+        }
+        try {
+            environment = OrtEnvironment.getEnvironment("faceswap-studio");
+            emap = loadEmap();
+            model = MappedAsset.open(assets, MODEL_PATH);
+            options = OnnxTools.stableCpuOptions();
+            session = environment.createSession(model.getBuffer(), options);
+            inputNames = resolveInputNames(session);
+        } catch (FaceSwapException error) {
+            close();
+            throw error;
+        } catch (OrtException | RuntimeException error) {
+            close();
+            throw new FaceSwapException("Das INSwapper-Modell konnte nicht geladen werden.", error);
+        } catch (OutOfMemoryError error) {
+            close();
+            throw new FaceSwapException(
+                "Zu wenig Arbeitsspeicher für das Face-Swap-Modell. Andere Apps schließen und erneut versuchen.",
+                error
+            );
+        } catch (Throwable error) {
+            close();
+            throw new FaceSwapException("ONNX Runtime konnte nicht gestartet werden.", error);
         }
     }
 
@@ -172,5 +193,31 @@ public final class FaceSwapper {
             this.source = source;
             this.target = target;
         }
+    }
+
+    @Override
+    public synchronized void close() {
+        if (session != null) {
+            try {
+                session.close();
+            } catch (Exception ignored) {
+                // Best-effort cleanup; the isolated service process is released afterwards.
+            }
+            session = null;
+        }
+        if (options != null) {
+            try {
+                options.close();
+            } catch (Exception ignored) {
+                // Best-effort cleanup.
+            }
+            options = null;
+        }
+        if (model != null) {
+            model.close();
+            model = null;
+        }
+        inputNames = null;
+        emap = null;
     }
 }
