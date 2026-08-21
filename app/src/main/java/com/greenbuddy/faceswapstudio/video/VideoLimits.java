@@ -26,6 +26,15 @@ public final class VideoLimits {
         );
     }
 
+    static int chooseOutputFrameCount(long durationUs, int outputFrameRate) {
+        if (durationUs <= 0L || outputFrameRate <= 0) {
+            throw new IllegalArgumentException("duration and frame rate must be positive");
+        }
+        // MediaMetadataRetriever may report the slightly longer AAC/container duration.
+        // Flooring avoids adding a complete final video frame for a tiny audio tail.
+        return Math.max(1, (int) ((durationUs * outputFrameRate) / 1_000_000L));
+    }
+
     static int chooseSwapInterval(int outputFrameCount) {
         if (outputFrameCount <= 0) {
             throw new IllegalArgumentException("outputFrameCount must be positive");

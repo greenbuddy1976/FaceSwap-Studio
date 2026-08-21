@@ -42,4 +42,10 @@ public final class VideoLimitsTest {
         assertEquals(2, VideoLimits.chooseSwapInterval(tenMinuteFrames));
         assertEquals(900, VideoLimits.estimatedSwapInferences(tenMinuteFrames));
     }
+
+    @Test
+    public void doesNotPadTinyAudioTailWithAWholeVideoFrame() {
+        assertEquals(1_800, VideoLimits.chooseOutputFrameCount(600_023_000L, 3));
+        assertEquals(1, VideoLimits.chooseOutputFrameCount(23_000L, 3));
+    }
 }

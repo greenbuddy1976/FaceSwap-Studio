@@ -59,10 +59,7 @@ public final class VideoFaceSwapEngine {
             }
 
             int frameRate = VideoLimits.chooseOutputFrameRate(spec.frameRate);
-            int frameCount = Math.max(
-                1,
-                (int) Math.ceil(spec.durationUs * frameRate / 1_000_000d)
-            );
+            int frameCount = VideoLimits.chooseOutputFrameCount(spec.durationUs, frameRate);
             int swapInterval = VideoLimits.chooseSwapInterval(frameCount);
             progress.update(
                 ProgressPlan.VIDEO_OPENED,
