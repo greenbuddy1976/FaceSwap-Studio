@@ -192,6 +192,9 @@ public final class FaceSwapEndToEndTest {
                 TAG,
                 "FACESWAP_VIDEO_METRIC ten_minute_service_ms=" + tenMinuteCompleted.elapsedMs
             );
+            // Emit all release-gate markers together so the earlier CPU proof cannot be
+            // evicted from logcat while the long-form video test is still running.
+            Log.i(TAG, "FACESWAP_STABLE_CPU_FALLBACK_INFERENCE_PASS");
             Log.i(TAG, "FACESWAP_TEN_MINUTE_VIDEO_E2E_PASS");
             Log.i(TAG, "FACESWAP_VIDEO_E2E_FULL_PASS");
         } finally {
@@ -247,7 +250,6 @@ public final class FaceSwapEndToEndTest {
                 float[] swapped = swapper.swap(targetAligned, embedding);
                 assertFinite("CPU INSwapper", swapped, 3 * 128 * 128);
             }
-            Log.i(TAG, "FACESWAP_STABLE_CPU_FALLBACK_INFERENCE_PASS");
         } finally {
             if (targetAligned != null) {
                 targetAligned.recycle();
