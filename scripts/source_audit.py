@@ -60,6 +60,12 @@ def main() -> int:
         if not re.search(pattern, manifest_text):
             errors.append(f"network permission is not explicitly removed: {permission}")
 
+    inference_service = (
+        ROOT / "app/src/main/java/com/greenbuddy/faceswapstudio/service/InferenceService.java"
+    ).read_text(encoding="utf-8")
+    if "MlKit.initialize(this);" not in inference_service:
+        errors.append("isolated inference process must initialize ML Kit explicitly")
+
     for path in ROOT.rglob("*"):
         if (
             not path.is_file()

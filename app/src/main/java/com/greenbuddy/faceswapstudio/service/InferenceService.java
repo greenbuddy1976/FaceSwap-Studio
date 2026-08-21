@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat;
 import com.greenbuddy.faceswapstudio.R;
 import com.greenbuddy.faceswapstudio.engine.FaceSwapEngine;
 import com.greenbuddy.faceswapstudio.engine.FaceSwapException;
+import com.google.mlkit.common.MlKit;
 
 import java.io.File;
 import java.util.concurrent.ExecutorService;
@@ -53,6 +54,7 @@ public final class InferenceService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        MlKit.initialize(this);
         executor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "faceswap-inference");
             thread.setPriority(Thread.NORM_PRIORITY - 1);
