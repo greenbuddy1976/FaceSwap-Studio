@@ -110,17 +110,14 @@ public final class Mp4AudioMuxer {
         long previousPresentationTimeUs = -1L;
 
         while (true) {
-            long announcedSize = extractor.getSampleSize();
-            if (announcedSize > Integer.MAX_VALUE) {
-                throw new FaceSwapException("Eine Mediendatei enthält ein unzulässig großes Einzelpaket.");
-            }
-            if (announcedSize > buffer.capacity()) {
-                buffer = ByteBuffer.allocateDirect((int) announcedSize);
-            }
             buffer.clear();
             int size = extractor.readSampleData(buffer, 0);
             if (size < 0) {
                 break;
+            }
+            if (size > buffer.capacity()) {
+                buffer = ByteBuffer.allocateDirect(size);
+                continue;
             }
             long presentationTimeUs = extractor.getSampleTime();
             if (presentationTimeUs < previousPresentationTimeUs) {
