@@ -52,7 +52,13 @@ jobs:
           gradle-version: "8.13"
           cache-disabled: true
 
-      - name: Generate fresh hash-locked ten-minute test MP4
+      - name: Install media fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+
+      - name: Generate fresh validated ten-minute test MP4
         run: bash scripts/generate_ten_minute_test_video.sh
 
       - name: Audit clean-room source

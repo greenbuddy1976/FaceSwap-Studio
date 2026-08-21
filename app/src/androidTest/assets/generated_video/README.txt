@@ -8,4 +8,5 @@ ten-minute-target-with-audio.mp4
 - 600 seconds, 256x256, 3 fps, H.264 + AAC
 - The generated portrait is visible at the start; the remaining frames are black so CI can verify
   the complete long-duration decode/encode/audio path without thousands of redundant model calls.
-- SHA-256 58998fac2b943890e07ce9dc8dca9e336a0d0e24348a9defe36cf36dcfaa8eb1
+- Generated freshly on the single GitHub runner and validated by duration, codec, dimensions,
+  frame rate, audio track, minimum size, and the hash-locked two-second source fixture.

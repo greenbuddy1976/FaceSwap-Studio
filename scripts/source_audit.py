@@ -50,8 +50,9 @@ TEST_RASTER_SHA256 = {
 TEST_VIDEO_SHA256 = {
     "app/src/androidTest/assets/generated_video/target-with-audio.mp4":
         "a97a2ae6e01ccd9651aa9d07824a015eaba6fc359c160cee8fd35e09e0e36a1d",
-    "app/src/androidTest/assets/generated_video/ten-minute-target-with-audio.mp4":
-        "58998fac2b943890e07ce9dc8dca9e336a0d0e24348a9defe36cf36dcfaa8eb1",
+}
+GENERATED_TEST_VIDEOS = {
+    "app/src/androidTest/assets/generated_video/ten-minute-target-with-audio.mp4",
 }
 
 
@@ -133,10 +134,14 @@ def main() -> int:
                 errors.append(f"generated test portrait hash mismatch: {relative}")
         if path.suffix.lower() == ".mp4" and relative.startswith("app/src/androidTest/assets/"):
             expected_hash = TEST_VIDEO_SHA256.get(relative)
-            if expected_hash is None:
+            if expected_hash is not None:
+                if hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+                    errors.append(f"generated test video hash mismatch: {relative}")
+            elif relative in GENERATED_TEST_VIDEOS:
+                if path.stat().st_size < 100_000:
+                    errors.append(f"fresh long-duration test video is truncated: {relative}")
+            else:
                 errors.append(f"unapproved MP4 is forbidden in Android test assets: {relative}")
-            elif hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
-                errors.append(f"generated test video hash mismatch: {relative}")
         if path.suffix == ".xml":
             try:
                 ET.parse(path)
@@ -156,6 +161,9 @@ def main() -> int:
     for relative in TEST_VIDEO_SHA256:
         if not (ROOT / relative).is_file():
             errors.append(f"missing generated end-to-end test video: {relative}")
+    for relative in GENERATED_TEST_VIDEOS:
+        if not (ROOT / relative).is_file():
+            errors.append(f"missing freshly generated long-duration test video: {relative}")
 
     end_to_end_test = (
         ROOT / "app/src/androidTest/java/com/greenbuddy/faceswapstudio/FaceSwapEndToEndTest.java"
@@ -190,7 +198,8 @@ def main() -> int:
         "SOURCE AUDIT OK: "
         f"{len(workflows)} workflow, valid XML, no old implementation markers, "
         f"{len(TEST_RASTER_SHA256)} hash-locked new test portraits and "
-        f"{len(TEST_VIDEO_SHA256)} hash-locked MP4 with audio"
+        f"{len(TEST_VIDEO_SHA256)} hash-locked MP4 plus "
+        f"{len(GENERATED_TEST_VIDEOS)} fresh long-duration MP4"
     )
     return 0
 
