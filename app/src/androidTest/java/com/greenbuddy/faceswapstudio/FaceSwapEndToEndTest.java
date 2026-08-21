@@ -387,7 +387,7 @@ public final class FaceSwapEndToEndTest {
         return -1;
     }
 
-    private static long durationMs(File file) {
+    private static long durationMs(File file) throws Exception {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(file.getAbsolutePath());
@@ -398,7 +398,7 @@ public final class FaceSwapEndToEndTest {
         }
     }
 
-    private static Bitmap firstFrame(File file) {
+    private static Bitmap firstFrame(File file) throws Exception {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(file.getAbsolutePath());
