@@ -107,7 +107,7 @@ public final class Mp4AudioMuxer {
         }
         ByteBuffer buffer = ByteBuffer.allocateDirect(capacity);
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        long previousPresentationTimeUs = -1L;
+        long previousPresentationTimeUs = Long.MIN_VALUE;
 
         while (true) {
             buffer.clear();
